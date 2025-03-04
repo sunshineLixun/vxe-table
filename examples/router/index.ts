@@ -81,6 +81,11 @@ const routes: Array<RouteRecordRaw> = [
     component: () => import('../views/grid/GridTest.vue')
   },
   {
+    path: '/component/merge-span',
+    name: 'MergeSpanTest',
+    component: () => import('../views/grid/MergeSpan.vue')
+  },
+  {
     path: '/keepAlives',
     component: () => import('../views/keepAlives/TestKeepAlive.vue'),
     children: [

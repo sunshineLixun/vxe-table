@@ -23,7 +23,7 @@ if (process.env.npm_lifecycle_event && process.env.npm_lifecycle_event.indexOf('
       commonjs: key,
       commonjs2: key,
       amd: key
-    }
+    } 
     externals[key] = item
   }
 }
@@ -40,7 +40,7 @@ module.exports = defineConfig({
     }
   },
   configureWebpack: {
-    performance: {
+    performance: { 
       hints: false
     },
     resolve: {

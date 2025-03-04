@@ -33,6 +33,7 @@ const navList = ref([
   { name: 'TableTest8', routerLink: { name: 'TableTest8' } },
   { name: 'TableTest9', routerLink: { name: 'TableTest9' } },
   { name: 'GridTest', routerLink: { name: 'GridTest' } },
+  { name: 'MergeSpanTest', routerLink: { name: 'MergeSpanTest' } },
   { name: 'TestKeepTest1', routerLink: { name: 'TestKeepTest1' } },
   { name: 'TestKeepTest2', routerLink: { name: 'TestKeepTest2' } },
   { name: 'TestKeepTest3', routerLink: { name: 'TestKeepTest3' } }
