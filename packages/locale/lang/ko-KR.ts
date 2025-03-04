@@ -17,6 +17,7 @@ export default {
       groupTag: '그룹화된 열 헤더는 "{0}"을 사용해야 하며, "{1}"을 사용하면 오류가 발생할 수 있습니다.',
       scrollErrProp: '가상 스크롤을 활성화한 경우, 매개변수 "{0}"은 지원되지 않습니다.',
       errConflicts: '매개변수 "{0}"과(와) "{1}"은(는) 충돌합니다.',
+      notSupportProp: '当启用参数 "{0}" 时不支持 "{1}"，应该为 "{2}"，否则将会出现错误',
       unableInsert: '지정된 위치에 삽입할 수 없습니다. 매개변수가 올바른지 확인하세요.',
       useErr: '"{0}" 모듈 설치 중 오류가 발생했습니다. 순서가 잘못되었을 수 있으며, 테이블 전에 종속 모듈이 설치되어야 합니다.',
       barUnableLink: '도구 모음과 테이블을 연결할 수 없습니다.',
@@ -50,7 +51,7 @@ export default {
       treeNotImp: '트리 테이블은 가져오기를 지원하지 않습니다.',
       treeCrossDrag: '첫 번째 계층만 드래그할 수 있습니다.',
       treeDragChild: '부모 항목은 자신의 하위 항목으로 드래그할 수 없습니다.',
-      reqPlugin: '선택적 확장 플러그인 "{1}" https://vxeui.com/other{0}/#/{1}/install'
+      reqPlugin: '扩展插件未安装 "{1}" https://vxeui.com/other{0}/#/{1}/install'
     },
     table: {
       emptyText: '데이터가 없습니다.',
@@ -118,7 +119,8 @@ export default {
     },
     button: {
       confirm: '확인',
-      cancel: '취소'
+      cancel: '취소',
+      clear: '清除'
     },
     filter: {
       search: '검색'
@@ -170,6 +172,7 @@ export default {
         pdf: 'PDF (*.pdf)'
       },
       modes: {
+        empty: '空数据',
         current: '현재 데이터(현재 페이지의 데이터)',
         selected: '선택된 데이터(현재 페이지에서 선택된 데이터)',
         all: '전체 데이터(모든 페이지의 데이터 포함)'

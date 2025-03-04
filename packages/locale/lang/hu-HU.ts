@@ -17,6 +17,7 @@ export default {
       groupTag: 'A csoportosító oszlopfejlécben a „{0}” értéket kell használni a „{1}” helyett, ami hibákat okozhat',
       scrollErrProp: 'A "{0}" paraméter nem támogatott, ha a virtuális görgetés engedélyezve van',
       errConflicts: 'A "{0}" paraméter ütközik a következővel: "{1}"',
+      notSupportProp: '当启用参数 "{0}" 时不支持 "{1}"，应该为 "{2}"，否则将会出现错误',
       unableInsert: 'Nem sikerült beilleszteni a megadott pozícióba, ellenőrizze, hogy a paraméterek helyesek-e',
       useErr: 'Hiba történt a "{0}" modul telepítésekor. Lehet, hogy a sorrend helytelen. A függő modulokat a táblázat előtt kell telepíteni.',
       barUnableLink: 'Az eszköztár nem társítható a táblázathoz',
@@ -50,7 +51,7 @@ export default {
       treeNotImp: 'A fatáblák nem támogatják az importálást',
       treeCrossDrag: '只能拖拽第一层级',
       treeDragChild: '父级不能拖拽到自己的子级中',
-      reqPlugin: '可选扩展插件 "{1}" https://vxeui.com/other{0}/#/{1}/install'
+      reqPlugin: '扩展插件未安装 "{1}" https://vxeui.com/other{0}/#/{1}/install'
     },
     table: {
       emptyText: 'Még nincsenek adatok',
@@ -118,7 +119,8 @@ export default {
     },
     button: {
       confirm: 'erősítse meg',
-      cancel: 'Mégsem'
+      cancel: 'Mégsem',
+      clear: '清除'
     },
     filter: {
       search: 'keresés'
@@ -170,6 +172,7 @@ export default {
         pdf: 'PDF (*.pdf)'
       },
       modes: {
+        empty: '空数据',
         current: 'Aktuális adatok (az aktuális oldal adatai)',
         selected: 'Kijelölt adatok (kijelölt adatok az aktuális oldalon)',
         all: 'Teljes adat (beleértve az összes oldalszámozott adatot)'

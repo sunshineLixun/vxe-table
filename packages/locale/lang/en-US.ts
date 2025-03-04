@@ -11,12 +11,13 @@ export default {
     },
     error: {
       downErr: 'Download failed',
-      errLargeData: '当绑定的数据量过大时，应该请使用 {0}，否则可能会出现卡顿',
+      errLargeData: 'When the amount of data bound is too large, you should use "{0}"; otherwise, a stall may occur',
       groupFixed: 'If using group headers, frozen columns must be set by group',
       groupMouseRange: 'The group header and "{0}" cannot be used at the same time, which may cause an error.',
       groupTag: 'Grouping column headers should use "{0}" instead of "{1}", which may cause errors',
       scrollErrProp: 'The parameter "{0}" is not supported when virtual scrolling is enabled',
-      errConflicts: 'Parameters "{0}" conflict with "{1}"',
+      errConflicts: '"{1}" is not supported when parameter "{0}", it should be "{2}", otherwise an error will occur',
+      notSupportProp: '"{1}" is not supported when parameter "{0}" is enabled, it should be "{2}", otherwise an error will occur',
       unableInsert: 'Unable to insert into the specified position, please check whether the parameters are correct',
       useErr: 'An error occurred while installing the "{0}" module. The order may be incorrect. The dependent modules need to be installed before Table.',
       barUnableLink: 'The toolbar cannot be associated with the table',
@@ -50,7 +51,7 @@ export default {
       treeNotImp: 'Tree tables do not support importing',
       treeCrossDrag: 'Only the first level can be dragged',
       treeDragChild: 'A parent cannot be dragged into its own children',
-      reqPlugin: 'Optional extension "{1}" https://vxeui.com/other{0}/#/{1}/install'
+      reqPlugin: 'Extension plugin not installed "{1}" https://vxeui.com/other{0}/#/{1}/install'
     },
     table: {
       emptyText: 'No data yet',
@@ -118,7 +119,8 @@ export default {
     },
     button: {
       confirm: 'confirm',
-      cancel: 'Cancel'
+      cancel: 'Cancel',
+      clear: '清除'
     },
     filter: {
       search: 'search'
@@ -170,6 +172,7 @@ export default {
         pdf: 'PDF (*.pdf)'
       },
       modes: {
+        empty: 'Null data',
         current: 'Current data (data of the current page)',
         selected: 'Selected data (selected data on the current page)',
         all: 'Full data (including all paginated data)'
@@ -261,14 +264,14 @@ export default {
           year: 'yyyy'
         },
         weeks: {
-          w: 'week',
-          w0: 'Sunday',
-          w1: 'on Monday',
-          w2: 'Tuesday',
-          w3: 'Wednesday',
-          w4: 'Thursday',
-          w5: 'Friday',
-          w6: 'Saturday'
+          w: 'Week',
+          w0: 'Sun',
+          w1: 'Mon',
+          w2: 'Tue',
+          w3: 'Wed',
+          w4: 'Thu',
+          w5: 'Fri',
+          w6: 'Sat'
         },
         months: {
           m0: 'January',

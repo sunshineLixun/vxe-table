@@ -17,6 +17,7 @@ export default {
       groupTag: '分组列头应该使用 "{0}" 而不是 "{1}"，这可能会出现错误',
       scrollErrProp: '启用虚拟滚动后不支持该参数 "{0}"',
       errConflicts: '参数 "{0}" 与 "{1}" 有冲突',
+      notSupportProp: '当启用参数 "{0}" 时不支持 "{1}"，应该为 "{2}"，否则将会出现错误',
       unableInsert: '无法插入到指定位置，请检查参数是否正确',
       useErr: '安装 "{0}" 模块时发生错误，可能顺序不正确，依赖的模块需要在 Table 之前安装',
       barUnableLink: '工具栏无法关联表格',
@@ -50,7 +51,7 @@ export default {
       treeNotImp: '树表格不支持导入',
       treeCrossDrag: '只能拖拽第一层级',
       treeDragChild: '父级不能拖拽到自己的子级中',
-      reqPlugin: '可选扩展插件 "{1}" https://vxeui.com/other{0}/#/{1}/install'
+      reqPlugin: '扩展插件未安装 "{1}" https://vxeui.com/other{0}/#/{1}/install'
     },
     table: {
       emptyText: '暂无数据',
@@ -118,7 +119,8 @@ export default {
     },
     button: {
       confirm: '确认',
-      cancel: '取消'
+      cancel: '取消',
+      clear: '清除'
     },
     filter: {
       search: '搜索'
@@ -170,6 +172,7 @@ export default {
         pdf: 'PDF (*.pdf)'
       },
       modes: {
+        empty: '空数据',
         current: '当前数据（当前页的数据）',
         selected: '选中数据（当前页选中的数据）',
         all: '全量数据（包括所有分页的数据）'
@@ -293,7 +296,7 @@ export default {
       }
     },
     numberInput: {
-      currencySymbol: '￥'
+      currencySymbol: '¥'
     },
     imagePreview: {
       popupTitle: '预览',

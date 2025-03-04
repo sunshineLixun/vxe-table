@@ -54,6 +54,7 @@
   overflow: hidden;
   outline: 0;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
 .vxe-table--header-inner-wrapper,
 .vxe-table--body-inner-wrapper,
@@ -63,6 +64,7 @@
   height: 100%;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
   &::-webkit-scrollbar {
     display: none;
   }
@@ -258,6 +260,13 @@
         }
       }
     }
+  }
+}
+
+/*负数显示红色*/
+.vxe-cell--label {
+  &.is--negative {
+    color: var(--vxe-ui-table-cell-negative-color);
   }
 }
 
@@ -481,6 +490,46 @@
         }
       }
     }
+    &.sx-pos--top {
+      .vxe-table--scroll-x-left-corner {
+        &::before {
+          @extend %TopLeftRadius;
+        }
+      }
+      .vxe-table--scroll-x-right-corner {
+        &::before {
+          @extend %TopRightRadius;
+        }
+      }
+    }
+    &.sx-pos--bottom {
+      &.sy-pos--right {
+        .vxe-table--scroll-y-top-corner {
+          @extend %TopRightRadius;
+          &::before {
+            @extend %TopRightRadius;
+          }
+        }
+      }
+      &.sy-pos--left {
+        .vxe-table--scroll-y-top-corner {
+          @extend %TopLeftRadius;
+          &::before {
+            @extend %TopLeftRadius;
+          }
+        }
+      }
+      .vxe-table--scroll-x-left-corner {
+        &::before {
+          @extend %BottomLeftRadius;
+        }
+      }
+      .vxe-table--scroll-x-right-corner {
+        &::before {
+          @extend %BottomRightRadius;
+        }
+      }
+    }
   }
 }
 
@@ -639,15 +688,6 @@
 .vxe-table {
   .vxe-table--header-wrapper {
     color: var(--vxe-ui-table-header-font-color);
-    &::after {
-      content: "";
-      position: absolute;
-      left: 0;
-      bottom: 0;
-      height: 0;
-      width: 100%;
-      border-bottom: var(--vxe-ui-table-border-width) solid var(--vxe-ui-table-border-color);
-    }
   }
   /*排序*/
   .vxe-cell--sort {
@@ -822,7 +862,7 @@
     background-color: var(--vxe-ui-layout-background-color);
   }
   .vxe-table--footer-wrapper {
-    margin-top: -1px;
+    margin-top: calc(var(--vxe-ui-table-border-width) * -1);
     background-color: var(--vxe-ui-table-footer-background-color);
   }
   .vxe-table--header,
@@ -984,11 +1024,6 @@
       }
     }
   }
-  &.header-cell--area {
-    .vxe-table--header-wrapper {
-      user-select: none;
-    }
-  }
   &.body-cell--area {
     .vxe-table--body-wrapper {
       user-select: none;
@@ -1090,29 +1125,53 @@
       border-top: var(--vxe-ui-table-border-width) solid var(--vxe-ui-table-border-color);
     }
     .vxe-table--scroll-x-wrapper {
-      &::before,
       &::after {
         content: "";
         position: absolute;
         left: 0;
         width: 100%;
-        height: 0;
+        height: 100%;
         z-index: 1;
+        pointer-events: none;
       }
-      &::before {
-        top: 0;
-        border-top: var(--vxe-ui-table-border-width) solid var(--vxe-ui-table-border-color);
-      }
-      &::after {
-        bottom: 0;
-        border-bottom: var(--vxe-ui-table-border-width) solid var(--vxe-ui-table-border-color);
+    }
+    &.sx-pos--top {
+      .vxe-table--scroll-x-wrapper {
+        &::after {
+          top: 0;
+          border-bottom: var(--vxe-ui-table-border-width) solid var(--vxe-ui-table-border-color);
+        }
       }
     }
     &.sx-pos--bottom {
       .vxe-table--scroll-x-wrapper {
-        &::before {
-          top: -1px;
+        &::after {
+          bottom: 0;
+          height: calc(100% + var(--vxe-ui-table-border-width));
+          border-top: var(--vxe-ui-table-border-width) solid var(--vxe-ui-table-border-color);
         }
+      }
+    }
+  }
+  &.border--default,
+  &.border--none,
+  &.border--outer,
+  &.border--inner {
+    .vxe-cell--col-resizable {
+      &:before,
+      &:after {
+        content: "";
+        display: inline-block;
+        vertical-align: middle;
+      }
+      &:before {
+        width: 1px;
+        height: 50%;
+        background-color: var(--vxe-ui-table-resizable-line-color);
+      }
+      &:after {
+        width: 0;
+        height: 100%;
       }
     }
   }
@@ -1158,28 +1217,30 @@
       }
     }
     .vxe-table--scroll-y-wrapper {
-      &::before,
       &::after {
         content: "";
         position: absolute;
         top: 0;
-        width: 0;
+        width: 100%;
         height: 100%;
         z-index: 1;
+        pointer-events: none;
       }
-      &::before {
-        left: 0;
-        border-left: var(--vxe-ui-table-border-width) solid var(--vxe-ui-table-border-color);
-      }
-      &::after {
-        right: 0;
-        border-right: var(--vxe-ui-table-border-width) solid var(--vxe-ui-table-border-color);
+    }
+    &.sy-pos--left {
+      .vxe-table--scroll-y-wrapper {
+        &::after {
+          left: 0;
+          border-right: var(--vxe-ui-table-border-width) solid var(--vxe-ui-table-border-color);
+        }
       }
     }
     &.sy-pos--right {
       .vxe-table--scroll-y-wrapper {
-        &::before {
-          left: -1px;
+        &::after {
+          right: 0;
+          width: calc(100% + var(--vxe-ui-table-border-width));
+          border-left: var(--vxe-ui-table-border-width) solid var(--vxe-ui-table-border-color);
         }
       }
     }
@@ -1217,11 +1278,6 @@
   &.border--none {
     .vxe-table--border-line {
       display: none;
-    }
-    .vxe-table--header-wrapper {
-      &::after {
-        display: none;
-      }
     }
   }
   
@@ -1629,6 +1685,32 @@
   }
 
   /*展开行*/
+  .vxe-table--row-expanded-wrapper {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .vxe-body--row-expanded-cell {
+    position: absolute;
+    z-index: 5;
+    top: 0;
+    left: 0;
+    width: 100%;
+    overflow: auto;
+    background-color: var(--vxe-ui-layout-background-color);
+    pointer-events: all;
+    &.is--padding {
+      padding: var(--vxe-ui-table-expand-padding-default);
+    }
+  }
+  .vxe-body--row-expanded-place-column {
+    border-bottom: var(--vxe-ui-table-border-width) solid var(--vxe-ui-table-border-color);
+    border-right: var(--vxe-ui-table-border-width) solid var(--vxe-ui-table-border-color);
+  }
   .vxe-table--expanded {
     cursor: pointer;
     .vxe-table--expand-btn {

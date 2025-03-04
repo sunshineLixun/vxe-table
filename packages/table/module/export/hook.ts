@@ -92,9 +92,9 @@ function getBooleanValue (cellValue: any) {
   return cellValue === 'TRUE' || cellValue === 'true' || cellValue === true
 }
 
-function getFooterData (opts: any, footerTableData: any) {
+function getFooterData (opts: VxeTablePropTypes.ExportHandleOptions, footerTableData: any[]) {
   const { footerFilterMethod } = opts
-  return footerFilterMethod ? footerTableData.filter((items: any, index: any) => footerFilterMethod({ items, $rowIndex: index })) : footerTableData
+  return footerFilterMethod ? footerTableData.filter((items, index) => footerFilterMethod({ items, $rowIndex: index })) : footerTableData
 }
 
 function getCsvCellTypeLabel (column: any, cellValue: any) {
@@ -511,7 +511,7 @@ hooks.add('tableExportModule', {
       return XEUtils.get(row, column.field)
     }
 
-    const toCsv = (opts: any, columns: any[], datas: any[]) => {
+    const toCsv = (opts: VxeTablePropTypes.ExportHandleOptions, columns: VxeTableDefines.ColumnInfo[], datas: any[]) => {
       let content = csvBOM
       if (opts.isHeader) {
         content += columns.map((column) => toTxtCellLabel(getHeaderTitle(opts, column))).join(',') + enterSymbol
@@ -522,14 +522,14 @@ hooks.add('tableExportModule', {
       if (opts.isFooter) {
         const { footerTableData } = reactData
         const footers = getFooterData(opts, footerTableData)
-        footers.forEach((row: any) => {
+        footers.forEach((row) => {
           content += columns.map((column: any) => toTxtCellLabel(getFooterCellValue(opts, row, column))).join(',') + enterSymbol
         })
       }
       return content
     }
 
-    const toTxt = (opts: any, columns: any[], datas: any[]) => {
+    const toTxt = (opts: VxeTablePropTypes.ExportHandleOptions, columns: VxeTableDefines.ColumnInfo[], datas: any[]) => {
       let content = ''
       if (opts.isHeader) {
         content += columns.map((column) => toTxtCellLabel(getHeaderTitle(opts, column))).join('\t') + enterSymbol
@@ -540,14 +540,14 @@ hooks.add('tableExportModule', {
       if (opts.isFooter) {
         const { footerTableData } = reactData
         const footers = getFooterData(opts, footerTableData)
-        footers.forEach((row: any) => {
+        footers.forEach((row) => {
           content += columns.map((column: any) => toTxtCellLabel(getFooterCellValue(opts, row, column))).join('\t') + enterSymbol
         })
       }
       return content
     }
 
-    const hasEllipsis = (column: any, property: string, allColumnOverflow: any) => {
+    const hasEllipsis = (column: VxeTableDefines.ColumnInfo, property: 'showOverflow' | 'showHeaderOverflow', allColumnOverflow: VxeTablePropTypes.ShowOverflow | undefined) => {
       const columnOverflow = column[property]
       const headOverflow = XEUtils.isUndefined(columnOverflow) || XEUtils.isNull(columnOverflow) ? allColumnOverflow : columnOverflow
       const showEllipsis = headOverflow === 'ellipsis'
@@ -562,7 +562,7 @@ hooks.add('tableExportModule', {
       return isEllipsis
     }
 
-    const toHtml = (opts: any, columns: any, datas: any) => {
+    const toHtml = (opts: VxeTablePropTypes.ExportHandleOptions, columns: VxeTableDefines.ColumnInfo[], datas: any[]) => {
       const { id, border, treeConfig, headerAlign: allHeaderAlign, align: allAlign, footerAlign: allFooterAlign, showOverflow: allColumnOverflow, showHeaderOverflow: allColumnHeaderOverflow } = props
       const { isAllSelected, isIndeterminate, mergeList } = reactData
       const treeOpts = computeTreeOpts.value
@@ -762,7 +762,7 @@ hooks.add('tableExportModule', {
       return `${xml}</Table></Worksheet></Workbook>`
     }
 
-    const getContent = (opts: any, columns: any, datas: any) => {
+    const getContent = (opts: VxeTablePropTypes.ExportHandleOptions, columns: VxeTableDefines.ColumnInfo[], datas: any[]) => {
       if (columns.length) {
         switch (opts.type) {
           case 'csv':
@@ -1033,7 +1033,7 @@ hooks.add('tableExportModule', {
         isMerge: hasMerge,
         useStyle: true,
         current: 'current',
-        modes: ['current', 'selected'].concat(proxyOpts.ajax && proxyOpts.ajax.queryAll ? ['all'] : [])
+        modes: (proxyOpts.ajax && proxyOpts.ajax.queryAll ? ['all'] : []).concat(['current', 'selected', 'empty'])
       }, options)
       const types: string[] = defOpts.types || XEUtils.keys(exportOpts._typeMaps)
       const modes: string[] = defOpts.modes || []
@@ -1138,24 +1138,28 @@ hooks.add('tableExportModule', {
        * @param {Object} options 参数
        */
       exportData (options) {
-        const { treeConfig } = props
-        const { isGroup, tableGroupColumn } = reactData
-        const { tableFullColumn, afterFullData } = internalData
+        const { treeConfig, showHeader, showFooter } = props
+        const { mergeList, mergeFooterList, isGroup } = reactData
+        const { tableFullColumn, afterFullData, collectColumn } = internalData
         const exportOpts = computeExportOpts.value
         const treeOpts = computeTreeOpts.value
+        const proxyOpts = $xeGrid ? $xeGrid.getComputeMaps().computeProxyOpts.value : {} as VxeGridPropTypes.ProxyOpts
+        const hasMerge = !!(mergeList.length || mergeFooterList.length)
         const opts = Object.assign({
+          message: true,
+          isHeader: showHeader,
+          isFooter: showFooter,
+          isColgroup: isGroup,
+          isMerge: hasMerge,
+          useStyle: true,
+          current: 'current',
+          modes: (proxyOpts.ajax && proxyOpts.ajax.queryAll ? ['all'] : []).concat(['current', 'selected', 'empty']),
+          download: true,
+          type: 'csv'
           // filename: '',
           // sheetName: '',
           // original: false,
-          // message: false,
-          isHeader: true,
-          isFooter: true,
-          isColgroup: true,
-          // isMerge: false,
           // isAllExpand: false,
-          download: true,
-          type: 'csv',
-          mode: 'current'
           // data: null,
           // remote: false,
           // dataFilterMethod: null,
@@ -1165,9 +1169,26 @@ hooks.add('tableExportModule', {
           // beforeExportMethod: null,
           // afterExportMethod: null
         }, exportOpts, options)
-        const { filename, sheetName, type, mode, columns, original, columnFilterMethod, beforeExportMethod, includeFields, excludeFields } = opts
+        let { filename, sheetName, type, mode, columns, original, columnFilterMethod, beforeExportMethod, includeFields, excludeFields } = opts
         let groups: any[] = []
-        const customCols = columns && columns.length ? columns : null
+        const selectRecords = $xeTable.getCheckboxRecords()
+        if (!mode) {
+          mode = selectRecords.length ? 'selected' : 'current'
+        }
+        const customCols = columns && columns.length
+          ? columns
+          : XEUtils.searchTree(collectColumn, column => {
+            const isColGroup = column.children && column.children.length
+            let isChecked = false
+            if (columns && columns.length) {
+              isChecked = handleFilterColumns(opts, column, columns)
+            } else if (excludeFields || includeFields) {
+              isChecked = handleFilterFields(opts, column, includeFields, excludeFields)
+            } else {
+              isChecked = column.visible && (isColGroup || defaultFilterExportColumn(column))
+            }
+            return isChecked
+          }, { children: 'children', mapChildren: 'childNodes', original: true })
         const handleOptions: VxeTablePropTypes.ExportHandleOptions = Object.assign({ } as { data: any[], colgroups: any[], columns: any[] }, opts, { filename: '', sheetName: '' })
         // 如果设置源数据，则默认导出设置了字段的列
         if (!customCols && !columnFilterMethod) {
@@ -1224,7 +1245,7 @@ hooks.add('tableExportModule', {
             }
           )
         } else {
-          groups = XEUtils.searchTree(isGroup ? tableGroupColumn : tableFullColumn, (column, index) => column.visible && (!columnFilterMethod || columnFilterMethod({ column, $columnIndex: index })), { children: 'children', mapChildren: 'childNodes', original: true })
+          groups = XEUtils.searchTree(isGroup ? collectColumn : tableFullColumn, (column, index) => column.visible && (!columnFilterMethod || columnFilterMethod({ column, $columnIndex: index })), { children: 'children', mapChildren: 'childNodes', original: true })
         }
         // 获取所有列
         const cols: VxeTableDefines.ColumnInfo[] = []
@@ -1287,7 +1308,6 @@ hooks.add('tableExportModule', {
         if (!handleOptions.data) {
           handleOptions.data = []
           if (mode === 'selected') {
-            const selectRecords = $xeTable.getCheckboxRecords()
             if (['html', 'pdf'].indexOf(type) > -1 && treeConfig) {
               handleOptions.data = XEUtils.searchTree($xeTable.getTableData().fullData, item => $xeTable.findRowIndexOf(selectRecords, item) > -1, Object.assign({}, treeOpts, { data: '_row' }))
             } else {
@@ -1346,7 +1366,7 @@ hooks.add('tableExportModule', {
                   })
               }
             }
-          } else if (mode === 'current') {
+          } if (mode === 'current') {
             handleOptions.data = afterFullData
           }
         }

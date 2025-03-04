@@ -296,7 +296,7 @@ export default {
       }
     },
     numberInput: {
-      currencySymbol: '$'
+      currencySymbol: '￥'
     },
     imagePreview: {
       popupTitle: '预览',

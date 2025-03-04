@@ -1,6 +1,6 @@
 import { defineComponent, h, ComponentPublicInstance, reactive, ref, Ref, provide, inject, nextTick, onActivated, onDeactivated, onBeforeUnmount, onUnmounted, watch, computed, onMounted } from 'vue'
 import XEUtils from 'xe-utils'
-import { browse, initTpImg, getTpImg, isPx, isScale, hasClass, addClass, removeClass, getEventTargetNode, getPaddingTopBottomSize, getOffsetPos, setScrollTop, setScrollLeft } from '../../ui/src/dom'
+import { browse, initTpImg, getTpImg, isPx, isScale, hasClass, addClass, removeClass, getEventTargetNode, getPaddingTopBottomSize, getOffsetPos, setScrollTop, setScrollLeft, toCssUnit } from '../../ui/src/dom'
 import { getLastZIndex, nextZIndex, hasChildrenList, getFuncText, isEnableConf, formatText, eqEmptyValue } from '../../ui/src/utils'
 import { VxeUI } from '../../ui'
 import Cell from './cell'
@@ -24,6 +24,8 @@ import type { VxeGridConstructor, VxeGridPrivateMethods, VxeTableConstructor, Ta
 const { getConfig, getIcon, getI18n, renderer, formats, createEvent, globalResize, interceptor, hooks, globalEvents, GLOBAL_EVENT_KEYS, useFns, renderEmptyElement } = VxeUI
 
 const customStorageKey = 'VXE_CUSTOM_STORE'
+const maxYHeight = 5e6
+const maxXWidth = 5e6
 
 export default defineComponent({
   name: 'VxeTable',
@@ -263,9 +265,16 @@ export default defineComponent({
       },
 
       scrollVMLoading: false,
+      scrollYHeight: 0,
+      scrollYTop: 0,
+      isScrollYBig: false,
+      scrollXLeft: 0,
+      scrollXWidth: 0,
+      isScrollXBig: false,
 
+      rowExpandHeightFlag: 1,
       calcCellHeightFlag: 1,
-      resizeHeightFlag: 0,
+      resizeHeightFlag: 1,
 
       isCustomStatus: false,
 
@@ -392,6 +401,9 @@ export default defineComponent({
     const refDragTipElem = ref<HTMLDivElement>()
     const refDragRowLineElem = ref<HTMLDivElement>()
     const refDragColLineElem = ref<HTMLDivElement>()
+
+    const refRowExpandElem = ref<HTMLDivElement>()
+    const refRowExpandYSpaceElem = ref<HTMLDivElement>()
 
     const refScrollXVirtualElem = ref<HTMLDivElement>()
     const refScrollYVirtualElem = ref<HTMLDivElement>()
@@ -684,6 +696,23 @@ export default defineComponent({
       return Object.assign({}, getConfig().table.customConfig, props.customConfig)
     })
 
+    const computeTableRowExpandedList = computed(() => {
+      const { rowExpandedMaps, tableData, expandColumn } = reactData
+      const expandList: any[] = []
+      if (expandColumn) {
+        const rowKeys: Record<string, boolean> = {}
+        tableData.forEach(row => {
+          rowKeys[getRowid($xeTable, row)] = true
+        })
+        XEUtils.each(rowExpandedMaps, (row, rowid) => {
+          if (rowKeys[rowid]) {
+            expandList.push(row)
+          }
+        })
+      }
+      return expandList
+    })
+
     const computeAutoWidthColumnList = computed(() => {
       const { visibleColumn } = internalData
       const { tableColumn } = reactData
@@ -912,32 +941,53 @@ export default defineComponent({
     }
 
     const handleVirtualXVisible = () => {
-      const { elemStore, visibleColumn } = internalData
+      const { isScrollXBig, scrollXWidth } = reactData
+      const { elemStore, visibleColumn, fullColumnIdData } = internalData
       const leftFixedWidth = computeLeftFixedWidth.value
       const rightFixedWidth = computeRightFixedWidth.value
       const bodyScrollElem = getRefElem(elemStore['main-body-scroll'])
       if (bodyScrollElem) {
-        const { scrollLeft, clientWidth } = bodyScrollElem
-        const startWidth = scrollLeft + leftFixedWidth
-        const endWidth = scrollLeft + clientWidth - rightFixedWidth
-        let toVisibleIndex = -1
-        let cWidth = 0
-        let visibleSize = 0
-        for (let colIndex = 0, colLen = visibleColumn.length; colIndex < colLen; colIndex++) {
-          cWidth += visibleColumn[colIndex].renderWidth
-          if (toVisibleIndex === -1 && startWidth < cWidth) {
-            toVisibleIndex = colIndex
+        const clientWidth = bodyScrollElem.clientWidth
+        let scrollLeft = bodyScrollElem.scrollLeft
+        if (isScrollXBig) {
+          scrollLeft = Math.ceil((scrollXWidth - clientWidth) * Math.min(1, (scrollLeft / (maxXWidth - clientWidth))))
+        }
+        const startLeft = scrollLeft + leftFixedWidth
+        const endLeft = scrollLeft + clientWidth - rightFixedWidth
+        let leftIndex = 0
+        let rightIndex = visibleColumn.length
+        while (leftIndex < rightIndex) {
+          const cIndex = Math.floor((leftIndex + rightIndex) / 2)
+          const column = visibleColumn[cIndex]
+          const colid = column.id
+          const colRest = fullColumnIdData[colid] || {}
+          if (colRest.oLeft <= startLeft) {
+            leftIndex = cIndex + 1
+          } else {
+            rightIndex = cIndex
           }
-          if (toVisibleIndex >= 0) {
-            visibleSize++
-            if (cWidth > endWidth) {
-              break
-            }
+        }
+        let visibleSize = 0
+        const toVisibleIndex = Math.max(0, leftIndex < visibleColumn.length ? leftIndex - 2 : 0)
+        for (let cIndex = toVisibleIndex, cLen = visibleColumn.length; cIndex < cLen; cIndex++) {
+          const column = visibleColumn[cIndex]
+          const colid = column.id
+          const colRest = fullColumnIdData[colid] || {}
+          visibleSize++
+          if (colRest.oLeft > endLeft || visibleSize >= 60) {
+            break
           }
         }
         return { toVisibleIndex: Math.max(0, toVisibleIndex), visibleSize: Math.max(1, visibleSize) }
       }
       return { toVisibleIndex: 0, visibleSize: 6 }
+    }
+
+    const calcVarRowHeightConfig = (sizeKey: 'default' | 'medium' | 'small' | 'mini', sizeEl: Element) => {
+      const { rowHeightStore } = reactData
+      if (sizeEl && sizeEl.clientHeight) {
+        rowHeightStore[sizeKey] = sizeEl.clientHeight
+      }
     }
 
     const computeRowHeight = () => {
@@ -969,8 +1019,8 @@ export default defineComponent({
       return Math.max(18, rowHeight)
     }
 
-    const handleVirtualYVisible = (currScrollTop?: number) => {
-      const { isAllOverflow } = reactData
+    const handleVirtualYVisible = () => {
+      const { isAllOverflow, expandColumn, isScrollYBig, scrollYHeight } = reactData
       const { elemStore, isResizeCellHeight, afterFullData, fullAllDataRowIdData } = internalData
       const rowOpts = computeRowOpts.value
       const cellOpts = computeCellOpts.value
@@ -978,29 +1028,40 @@ export default defineComponent({
       const bodyScrollElem = getRefElem(elemStore['main-body-scroll'])
       if (bodyScrollElem) {
         const clientHeight = bodyScrollElem.clientHeight
-        const scrollTop = XEUtils.isNumber(currScrollTop) ? currScrollTop : bodyScrollElem.scrollTop
-        const endHeight = scrollTop + clientHeight
+        let scrollTop = bodyScrollElem.scrollTop
+        if (isScrollYBig) {
+          scrollTop = Math.ceil((scrollYHeight - clientHeight) * Math.min(1, (scrollTop / (maxYHeight - clientHeight))))
+        }
+        const startTop = scrollTop
+        const endTop = scrollTop + clientHeight
         let toVisibleIndex = -1
-        let offsetTop = 0
         let visibleSize = 0
         const isCustomCellHeight = isResizeCellHeight || cellOpts.height || rowOpts.height
-        if (!isCustomCellHeight && isAllOverflow) {
-          toVisibleIndex = Math.floor(scrollTop / defaultRowHeight)
+        if (!isCustomCellHeight && !expandColumn && isAllOverflow) {
+          toVisibleIndex = Math.floor(startTop / defaultRowHeight) - 1
           visibleSize = Math.ceil(clientHeight / defaultRowHeight) + 1
         } else {
-          for (let rIndex = 0, rLen = afterFullData.length; rIndex < rLen; rIndex++) {
+          let leftIndex = 0
+          let rightIndex = afterFullData.length
+          while (leftIndex < rightIndex) {
+            const rIndex = Math.floor((leftIndex + rightIndex) / 2)
             const row = afterFullData[rIndex]
             const rowid = getRowid($xeTable, row)
             const rowRest = fullAllDataRowIdData[rowid] || {}
-            offsetTop += rowRest.resizeHeight || cellOpts.height || rowOpts.height || rowRest.height || defaultRowHeight
-            if (toVisibleIndex === -1 && scrollTop < offsetTop) {
-              toVisibleIndex = rIndex
+            if (rowRest.oTop <= startTop) {
+              leftIndex = rIndex + 1
+            } else {
+              rightIndex = rIndex
             }
-            if (toVisibleIndex >= 0) {
-              visibleSize++
-              if (offsetTop > endHeight) {
-                break
-              }
+          }
+          toVisibleIndex = Math.max(0, leftIndex < afterFullData.length ? leftIndex - 2 : 0)
+          for (let rIndex = toVisibleIndex, rLen = afterFullData.length; rIndex < rLen; rIndex++) {
+            const row = afterFullData[rIndex]
+            const rowid = getRowid($xeTable, row)
+            const rowRest = fullAllDataRowIdData[rowid] || {}
+            visibleSize++
+            if (rowRest.oTop > endTop || visibleSize >= 100) {
+              break
             }
           }
         }
@@ -1214,6 +1275,7 @@ export default defineComponent({
       const fullColumnIdData: Record<string, VxeTableDefines.ColumnCacheItem> = internalData.fullColumnIdData = {}
       const fullColumnFieldData: Record<string, VxeTableDefines.ColumnCacheItem> = internalData.fullColumnFieldData = {}
       const mouseOpts = computeMouseOpts.value
+      const expandOpts = computeExpandOpts.value
       const columnOpts = computeColumnOpts.value
       const columnDragOpts = computeColumnDragOpts.value
       const { isCrossDrag, isSelfToChildDrag } = columnDragOpts
@@ -1230,7 +1292,7 @@ export default defineComponent({
       let hasFixed: VxeColumnPropTypes.Fixed | undefined
       const handleFunc = (column: VxeTableDefines.ColumnInfo, index: number, items: VxeTableDefines.ColumnInfo[], path?: string[], parentColumn?: VxeTableDefines.ColumnInfo) => {
         const { id: colid, field, fixed, type, treeNode } = column
-        const rest = { $index: -1, _index: -1, column, colid, index, items, parent: parentColumn || null, width: 0 }
+        const rest = { $index: -1, _index: -1, column, colid, index, items, parent: parentColumn || null, width: 0, oLeft: 0 }
         if (field) {
           if (fullColumnFieldData[field]) {
             errLog('vxe.error.colRepet', ['field', field])
@@ -1300,10 +1362,8 @@ export default defineComponent({
         tableFullColumn.forEach(handleFunc)
       }
 
-      if (process.env.VUE_APP_VXE_ENV === 'development') {
-        if (expandColumn && mouseOpts.area) {
-          errLog('vxe.error.errConflicts', ['mouse-config.area', 'column.type=expand'])
-        }
+      if ((expandColumn && expandOpts.mode !== 'fixed') && mouseOpts.area) {
+        errLog('vxe.error.errConflicts', ['mouse-config.area', 'column.type=expand'])
       }
 
       if (process.env.VUE_APP_VXE_ENV === 'development') {
@@ -1388,7 +1448,7 @@ export default defineComponent({
       if (!xHandleEl) {
         return
       }
-      let tableWidth = 0
+      let tWidth = 0
       const minCellWidth = 40 // 列宽最少限制 40px
       const bodyWidth = bodyElem.clientWidth
       let remainWidth = bodyWidth
@@ -1399,51 +1459,51 @@ export default defineComponent({
       // 最小宽
       pxMinList.forEach((column) => {
         const minWidth = XEUtils.toInteger(column.minWidth)
-        tableWidth += minWidth
+        tWidth += minWidth
         column.renderWidth = minWidth
       })
       // 最小自适应
       autoMinList.forEach((column) => {
         const caWidth = Math.max(60, XEUtils.toInteger(column.renderAutoWidth))
-        tableWidth += caWidth
+        tWidth += caWidth
         column.renderWidth = caWidth
       })
       // 最小百分比
       scaleMinList.forEach((column) => {
         const smWidth = Math.floor(XEUtils.toInteger(column.minWidth) * meanWidth)
-        tableWidth += smWidth
+        tWidth += smWidth
         column.renderWidth = smWidth
       })
       // 固定百分比
       scaleList.forEach((column) => {
         const sfWidth = Math.floor(XEUtils.toInteger(column.width) * meanWidth)
-        tableWidth += sfWidth
+        tWidth += sfWidth
         column.renderWidth = sfWidth
       })
       // 固定宽
       pxList.forEach((column) => {
         const pWidth = XEUtils.toInteger(column.width)
-        tableWidth += pWidth
+        tWidth += pWidth
         column.renderWidth = pWidth
       })
       // 自适应宽
       autoList.forEach((column) => {
         const aWidth = Math.max(60, XEUtils.toInteger(column.renderAutoWidth))
-        tableWidth += aWidth
+        tWidth += aWidth
         column.renderWidth = aWidth
       })
       // 调整了列宽
       resizeList.forEach((column) => {
         const reWidth = XEUtils.toInteger(column.resizeWidth)
-        tableWidth += reWidth
+        tWidth += reWidth
         column.renderWidth = reWidth
       })
-      remainWidth -= tableWidth
+      remainWidth -= tWidth
       meanWidth = remainWidth > 0 ? Math.floor(remainWidth / (scaleMinList.length + pxMinList.length + autoMinList.length + remainList.length)) : 0
       if (fit) {
         if (remainWidth > 0) {
           scaleMinList.concat(pxMinList).concat(autoMinList).forEach((column) => {
-            tableWidth += meanWidth
+            tWidth += meanWidth
             column.renderWidth += meanWidth
           })
         }
@@ -1454,7 +1514,7 @@ export default defineComponent({
       remainList.forEach((column) => {
         const width = Math.max(meanWidth, minCellWidth)
         column.renderWidth = width
-        tableWidth += width
+        tWidth += width
       })
       if (fit) {
         /**
@@ -1464,13 +1524,13 @@ export default defineComponent({
         const dynamicList = scaleList.concat(scaleMinList).concat(pxMinList).concat(autoMinList).concat(remainList)
         let dynamicSize = dynamicList.length - 1
         if (dynamicSize > 0) {
-          let i = bodyWidth - tableWidth
+          let i = bodyWidth - tWidth
           if (i > 0) {
             while (i > 0 && dynamicSize >= 0) {
               i--
               dynamicList[dynamicSize--].renderWidth++
             }
-            tableWidth = bodyWidth
+            tWidth = bodyWidth
           }
         }
       }
@@ -1478,18 +1538,19 @@ export default defineComponent({
       const overflowY = yHandleEl.scrollHeight > yHandleEl.clientHeight
       reactData.scrollbarWidth = Math.max(scrollbarOpts.width || 0, yHandleEl.offsetWidth - yHandleEl.clientWidth)
       reactData.overflowY = overflowY
-      internalData.tableWidth = tableWidth
+      reactData.scrollXWidth = tWidth
       internalData.tableHeight = tableHeight
 
       const headerTableElem = getRefElem(elemStore['main-header-table'])
       const footerTableElem = getRefElem(elemStore['main-footer-table'])
       const headerHeight = headerTableElem ? headerTableElem.clientHeight : 0
-      const overflowX = tableWidth > bodyWidth
+      const overflowX = tWidth > bodyWidth
       const footerHeight = footerTableElem ? footerTableElem.clientHeight : 0
       reactData.scrollbarHeight = Math.max(scrollbarOpts.height || 0, xHandleEl.offsetHeight - xHandleEl.clientHeight)
       internalData.headerHeight = headerHeight
       internalData.footerHeight = footerHeight
       reactData.overflowX = overflowX
+      updateColumnOffsetLeft()
       updateHeight()
       reactData.parentHeight = Math.max(internalData.headerHeight + footerHeight + 20, $xeTable.getParentHeight())
       if (overflowX) {
@@ -1551,6 +1612,7 @@ export default defineComponent({
     }
 
     const updateAfterListIndex = () => {
+      const { treeConfig } = props
       const { afterFullData, fullDataRowIdData, fullAllDataRowIdData } = internalData
       const fullMaps: Record<string, any> = {}
       afterFullData.forEach((row, index) => {
@@ -1558,10 +1620,12 @@ export default defineComponent({
         const rowRest = fullAllDataRowIdData[rowid]
         const seq = index + 1
         if (rowRest) {
-          rowRest.seq = seq
+          if (!treeConfig) {
+            rowRest.seq = seq
+          }
           rowRest._index = index
         } else {
-          const rest = { row, rowid, seq, index: -1, $index: -1, _index: index, treeIndex: -1, items: [], parent: null, level: 0, height: 0, resizeHeight: 0, oTop: 0 }
+          const rest = { row, rowid, seq, index: -1, $index: -1, _index: index, treeIndex: -1, items: [], parent: null, level: 0, height: 0, resizeHeight: 0, oTop: 0, expandHeight: 0 }
           fullAllDataRowIdData[rowid] = rest
           fullDataRowIdData[rowid] = rest
         }
@@ -1590,7 +1654,7 @@ export default defineComponent({
             rowRest.seq = seq
             rowRest.treeIndex = index
           } else {
-            const rest = { row, rowid, seq, index: -1, $index: -1, _index: -1, treeIndex: -1, items: [], parent: null, level: 0, height: 0, resizeHeight: 0, oTop: 0 }
+            const rest = { row, rowid, seq, index: -1, $index: -1, _index: -1, treeIndex: -1, items: [], parent: null, level: 0, height: 0, resizeHeight: 0, oTop: 0, expandHeight: 0 }
             fullAllDataRowIdData[rowid] = rest
             fullDataRowIdData[rowid] = rest
           }
@@ -1791,8 +1855,8 @@ export default defineComponent({
 
     const updateStyle = () => {
       const { border, showHeaderOverflow: allColumnHeaderOverflow, showFooterOverflow: allColumnFooterOverflow, mouseConfig, spanMethod, footerSpanMethod } = props
-      const { isGroup, currentRow, tableColumn, scrollXLoad, scrollYLoad, overflowX, scrollbarWidth, overflowY, scrollbarHeight, columnStore, editStore, isAllOverflow, expandColumn } = reactData
-      const { visibleColumn, fullColumnIdData, tableHeight, tableWidth, headerHeight, footerHeight, elemStore, customHeight, customMinHeight, customMaxHeight } = internalData
+      const { isGroup, currentRow, tableColumn, scrollXLoad, scrollYLoad, overflowX, scrollbarWidth, overflowY, scrollbarHeight, scrollXWidth, columnStore, editStore, isAllOverflow, expandColumn } = reactData
+      const { visibleColumn, fullColumnIdData, tableHeight, headerHeight, footerHeight, elemStore, customHeight, customMinHeight, customMaxHeight } = internalData
       const el = refElem.value
       if (!el) {
         return
@@ -1803,6 +1867,7 @@ export default defineComponent({
       const emptyPlaceholderElem = refEmptyPlaceholder.value
       const cellOffsetWidth = computeCellOffsetWidth.value
       const mouseOpts = computeMouseOpts.value
+      const expandOpts = computeExpandOpts.value
       const bodyWrapperElem = getRefElem(elemStore['main-body-wrapper'])
       const bodyTableElem = getRefElem(elemStore['main-body-table'])
       if (emptyPlaceholderElem) {
@@ -1831,9 +1896,10 @@ export default defineComponent({
         bodyHeight = Math.max(bodyMinHeight, bodyHeight)
       }
 
+      const scrollbarXToTop = computeScrollbarXToTop.value
+
       const xLeftCornerEl = refScrollXLeftCornerElem.value
       const xRightCornerEl = refScrollXRightCornerElem.value
-      const scrollbarXToTop = computeScrollbarXToTop.value
       const scrollXVirtualEl = refScrollXVirtualElem.value
       if (scrollXVirtualEl) {
         scrollXVirtualEl.style.height = `${osbHeight}px`
@@ -1876,6 +1942,12 @@ export default defineComponent({
         yBottomCornerEl.style.display = footerHeight ? 'block' : ''
       }
 
+      const rowExpandEl = refRowExpandElem.value
+      if (rowExpandEl) {
+        rowExpandEl.style.height = `${bodyHeight}px`
+        rowExpandEl.style.top = `${headerHeight}px`
+      }
+
       containerList.forEach((name, index) => {
         const fixedType = index > 0 ? name : ''
         const layoutList = ['header', 'body', 'footer']
@@ -1893,18 +1965,11 @@ export default defineComponent({
           if (layout === 'header') {
             // 表头体样式处理
             // 横向滚动渲染
-            let tWidth = tableWidth
             let renderColumnList = tableColumn
             let isOptimizeMode = false
 
             if (isGroup) {
               renderColumnList = visibleColumn
-
-              if (fixedType) {
-                if (wrapperElem) {
-                  wrapperElem.style.width = tWidth ? `${tWidth}px` : ''
-                }
-              }
             } else {
               // 如果是使用优化模式
               if (scrollXLoad || scrollYLoad || allColumnHeaderOverflow) {
@@ -1921,16 +1986,28 @@ export default defineComponent({
                 if (isOptimizeMode) {
                   renderColumnList = fixedColumn || []
                 }
+              }
+            }
 
-                if (!isOptimizeMode) {
+            const tWidth = renderColumnList.reduce((previous, column) => previous + column.renderWidth, 0)
+
+            if (fixedType) {
+              if (isGroup) {
+                if (wrapperElem) {
+                  wrapperElem.style.width = scrollXWidth ? `${scrollXWidth}px` : ''
+                }
+              } else {
+                if (isOptimizeMode) {
                   if (wrapperElem) {
                     wrapperElem.style.width = tWidth ? `${tWidth}px` : ''
+                  }
+                } else {
+                  if (wrapperElem) {
+                    wrapperElem.style.width = scrollXWidth ? `${scrollXWidth}px` : ''
                   }
                 }
               }
             }
-
-            tWidth = renderColumnList.reduce((previous, column) => previous + column.renderWidth, 0)
 
             if (currScrollElem) {
               currScrollElem.style.height = `${headerHeight}px`
@@ -1938,11 +2015,6 @@ export default defineComponent({
 
             if (tableElem) {
               tableElem.style.width = tWidth ? `${tWidth}px` : ''
-            }
-
-            const repairElem = getRefElem(elemStore[`${name}-${layout}-repair`])
-            if (repairElem) {
-              repairElem.style.width = `${tableWidth}px`
             }
 
             const listElem = getRefElem(elemStore[`${name}-${layout}-list`])
@@ -1987,13 +2059,12 @@ export default defineComponent({
               fixedWrapperElem.style.width = `${fixedColumn.reduce((previous, column) => previous + column.renderWidth, 0)}px`
             }
 
-            let tWidth = tableWidth
             let renderColumnList = tableColumn
 
             let isOptimizeMode = false
             // 如果是使用优化模式
             if (scrollXLoad || scrollYLoad || isAllOverflow) {
-              if (expandColumn || spanMethod || footerSpanMethod) {
+              if ((expandColumn && expandOpts.mode !== 'fixed') || spanMethod || footerSpanMethod) {
                 // 如果不支持优化模式
               } else {
                 isOptimizeMode = true
@@ -2005,15 +2076,21 @@ export default defineComponent({
               if (isOptimizeMode) {
                 renderColumnList = fixedColumn || []
               }
+            }
 
-              if (!isOptimizeMode) {
+            const tWidth = renderColumnList.reduce((previous, column) => previous + column.renderWidth, 0)
+
+            if (fixedType) {
+              if (isOptimizeMode) {
                 if (wrapperElem) {
                   wrapperElem.style.width = tWidth ? `${tWidth}px` : ''
                 }
+              } else {
+                if (wrapperElem) {
+                  wrapperElem.style.width = scrollXWidth ? `${scrollXWidth}px` : ''
+                }
               }
             }
-
-            tWidth = renderColumnList.reduce((previous, column) => previous + column.renderWidth, 0)
 
             if (tableElem) {
               tableElem.style.width = tWidth ? `${tWidth}px` : ''
@@ -2025,8 +2102,6 @@ export default defineComponent({
               emptyBlockElem.style.width = tWidth ? `${tWidth}px` : ''
             }
           } else if (layout === 'footer') {
-            let tWidth = tableWidth
-
             let renderColumnList = tableColumn
             let isOptimizeMode = false
             // 如果是使用优化模式
@@ -2043,15 +2118,21 @@ export default defineComponent({
               if (isOptimizeMode) {
                 renderColumnList = fixedColumn || []
               }
+            }
 
-              if (!isOptimizeMode) {
+            const tWidth = renderColumnList.reduce((previous, column) => previous + column.renderWidth, 0)
+
+            if (fixedType) {
+              if (isOptimizeMode) {
                 if (wrapperElem) {
                   wrapperElem.style.width = tWidth ? `${tWidth}px` : ''
                 }
+              } else {
+                if (wrapperElem) {
+                  wrapperElem.style.width = scrollXWidth ? `${scrollXWidth}px` : ''
+                }
               }
             }
-
-            tWidth = renderColumnList.reduce((previous, column) => previous + column.renderWidth, 0)
 
             if (currScrollElem) {
               currScrollElem.style.height = `${footerHeight}px`
@@ -2394,7 +2475,7 @@ export default defineComponent({
       reactData.isIndeterminate = false
       reactData.treeIndeterminateMaps = {}
       internalData.treeIndeterminateRowMaps = {}
-      tablePrivateMethods.checkSelectionStatus()
+      $xeTable.checkSelectionStatus()
       return nextTick()
     }
 
@@ -2431,12 +2512,12 @@ export default defineComponent({
       reactData.rowExpandedMaps = expandColumn ? getRecoverRowMaps(rowExpandedMaps) : {} // 刷新行展开状态
       // 还原保留状态
       if (expandColumn && expandOpts.reserve) {
-        tableMethods.setRowExpand(handleReserveRow(internalData.rowExpandedReserveRowMap), true)
+        $xeTable.setRowExpand(handleReserveRow(internalData.rowExpandedReserveRowMap), true)
       }
       // 树展开
       reactData.treeExpandedMaps = treeConfig ? getRecoverRowMaps(treeExpandedMaps) : {} // 刷新树展开状态
       if (treeConfig && treeOpts.reserve) {
-        tableMethods.setTreeExpand(handleReserveRow(internalData.treeExpandedReserveRowMap), true)
+        $xeTable.setTreeExpand(handleReserveRow(internalData.treeExpandedReserveRowMap), true)
       }
     }
 
@@ -2567,7 +2648,10 @@ export default defineComponent({
               delete rExpandLazyLoadedMaps[rowid]
             }
             reactData.rowExpandLazyLoadedMaps = rExpandLazyLoadedMaps
-            nextTick().then(() => tableMethods.recalculate()).then(() => resolve())
+            nextTick()
+              .then(() => $xeTable.recalculate())
+              .then(() => $xeTable.updateCellAreas())
+              .then(() => resolve())
           })
         } else {
           resolve()
@@ -2655,17 +2739,34 @@ export default defineComponent({
       if (!el || !el.clientWidth) {
         return nextTick()
       }
+      const varEl = refVarElem.value
+      if (varEl) {
+        const [defEl, mediumEl, smallEl, miniEl] = varEl.children
+        calcVarRowHeightConfig('default', defEl)
+        calcVarRowHeightConfig('medium', mediumEl)
+        calcVarRowHeightConfig('small', smallEl)
+        calcVarRowHeightConfig('mini', miniEl)
+      }
       calcCellWidth()
       autoCellWidth()
       updateStyle()
-      await computeScrollLoad()
-      if (reFull === true) {
-        // 初始化时需要在列计算之后再执行优化运算，达到最优显示效果
-        calcCellWidth()
-        autoCellWidth()
-        updateStyle()
-        return computeScrollLoad()
+      if (reFull) {
+        updateRowOffsetTop()
       }
+      updateRowExpandStyle()
+      return computeScrollLoad().then(() => {
+        if (reFull === true) {
+          // 初始化时需要在列计算之后再执行优化运算，达到最优显示效果
+          calcCellWidth()
+          autoCellWidth()
+          updateStyle()
+          if (reFull) {
+            updateRowOffsetTop()
+          }
+          updateRowExpandStyle()
+          return computeScrollLoad()
+        }
+      })
     }
 
     /**
@@ -2732,15 +2833,11 @@ export default defineComponent({
       internalData.tableFullData = fullData
       internalData.tableFullTreeData = treeData
       // 缓存数据
-      $xeTable.cacheRowMap(true, isReset)
+      $xeTable.cacheRowMap(true)
       // 原始数据
       internalData.tableSynchData = datas
       if (isReset) {
         internalData.isResizeCellHeight = false
-        reactData.rowExpandedMaps = {}
-        reactData.rowExpandLazyLoadedMaps = {}
-        reactData.treeExpandedMaps = {}
-        reactData.treeExpandLazyLoadedMaps = {}
       }
       // 克隆原数据，用于显示编辑状态，与编辑值做对比
       if (keepSource) {
@@ -2754,69 +2851,76 @@ export default defineComponent({
       tableMethods.clearMergeFooterItems()
       tablePrivateMethods.handleTableData(true)
       tableMethods.updateFooter()
-      await nextTick()
-      updateHeight()
-      updateStyle()
-      computeScrollLoad()
-      // 是否启用了虚拟滚动
-      if (sYLoad) {
-        scrollYStore.endIndex = scrollYStore.visibleSize
-      }
-      if (sYLoad) {
-        // if (showOverflow) {
-        //   if (!rowOpts.height) {
-        //     const errColumn = internalData.tableFullColumn.find(column => column.showOverflow === false)
-        //     if (errColumn) {
-        //       errLog('vxe.error.errProp', [`column[field="${errColumn.field}"].show-overflow=false`, 'show-overflow=true'])
-        //     }
-        //   }
-        // }
-        if (process.env.VUE_APP_VXE_ENV === 'development') {
-          if (!(props.height || props.maxHeight)) {
-            errLog('vxe.error.reqProp', ['table.height | table.max-height | table.scroll-y={enabled: false}'])
-          }
-          // if (!props.showOverflow) {
-          //   warnLog('vxe.error.reqProp', ['table.show-overflow'])
+      return nextTick().then(() => {
+        updateHeight()
+        updateStyle()
+      }).then(() => {
+        computeScrollLoad()
+      }).then(() => {
+        // 是否启用了虚拟滚动
+        if (sYLoad) {
+          scrollYStore.endIndex = scrollYStore.visibleSize
+        }
+
+        if (sYLoad) {
+          // if (showOverflow) {
+          //   if (!rowOpts.height) {
+          //     const errColumn = internalData.tableFullColumn.find(column => column.showOverflow === false)
+          //     if (errColumn) {
+          //       errLog('vxe.error.errProp', [`column[field="${errColumn.field}"].show-overflow=false`, 'show-overflow=true'])
+          //     }
+          //   }
           // }
-          if (props.spanMethod) {
-            warnLog('vxe.error.scrollErrProp', ['table.span-method'])
+
+          if (process.env.VUE_APP_VXE_ENV === 'development') {
+            if (!(props.height || props.maxHeight)) {
+              errLog('vxe.error.reqProp', ['table.height | table.max-height | table.scroll-y={enabled: false}'])
+            }
+            // if (!props.showOverflow) {
+            //   warnLog('vxe.error.reqProp', ['table.show-overflow'])
+            // }
+            if (props.spanMethod) {
+              warnLog('vxe.error.scrollErrProp', ['table.span-method'])
+            }
           }
         }
-      }
-      handleReserveStatus()
-      tablePrivateMethods.checkSelectionStatus()
-      return await new Promise<void>(resolve => {
-        nextTick()
-          .then(() => tableMethods.recalculate())
-          .then(() => {
-            let targetScrollLeft = lastScrollLeft
-            let targetScrollTop = lastScrollTop
-            const sXOpts = computeSXOpts.value
-            const sYOpts = computeSYOpts.value
-            // 是否在更新数据之后自动滚动重置滚动条
-            if (sXOpts.scrollToLeftOnChange) {
-              targetScrollLeft = 0
-            }
-            if (sYOpts.scrollToTopOnChange) {
-              targetScrollTop = 0
-            }
-            reactData.isRowLoading = false
-            calcCellHeight()
-            // 是否变更虚拟滚动
-            if (oldScrollYLoad === sYLoad) {
-              restoreScrollLocation($xeTable, targetScrollLeft, targetScrollTop)
-                .then(() => {
-                  resolve()
-                })
-            } else {
-              setTimeout(() => {
+
+        handleReserveStatus()
+        tablePrivateMethods.checkSelectionStatus()
+        return new Promise<void>(resolve => {
+          nextTick()
+            .then(() => tableMethods.recalculate())
+            .then(() => {
+              let targetScrollLeft = lastScrollLeft
+              let targetScrollTop = lastScrollTop
+              const sXOpts = computeSXOpts.value
+              const sYOpts = computeSYOpts.value
+              // 是否在更新数据之后自动滚动重置滚动条
+              if (sXOpts.scrollToLeftOnChange) {
+                targetScrollLeft = 0
+              }
+              if (sYOpts.scrollToTopOnChange) {
+                targetScrollTop = 0
+              }
+              reactData.isRowLoading = false
+              calcCellHeight()
+              updateRowOffsetTop()
+              // 是否变更虚拟滚动
+              if (oldScrollYLoad === sYLoad) {
                 restoreScrollLocation($xeTable, targetScrollLeft, targetScrollTop)
                   .then(() => {
                     resolve()
                   })
-              })
-            }
-          })
+              } else {
+                setTimeout(() => {
+                  restoreScrollLocation($xeTable, targetScrollLeft, targetScrollTop)
+                    .then(() => {
+                      resolve()
+                    })
+                })
+              }
+            })
+        })
       })
     }
 
@@ -2865,16 +2969,16 @@ export default defineComponent({
     }
 
     const loadScrollXData = () => {
-      const { mergeList, mergeFooterList } = reactData
+      const { mergeList, mergeFooterList, isScrollXBig } = reactData
       const { scrollXStore } = internalData
       const { preloadSize, startIndex, endIndex, offsetSize } = scrollXStore
       const { toVisibleIndex, visibleSize } = handleVirtualXVisible()
       const offsetItem = {
-        startIndex: Math.max(0, toVisibleIndex - 1 - offsetSize - preloadSize),
-        endIndex: toVisibleIndex + visibleSize + offsetSize + preloadSize
+        startIndex: Math.max(0, isScrollXBig ? toVisibleIndex - 1 : toVisibleIndex - 1 - offsetSize - preloadSize),
+        endIndex: isScrollXBig ? toVisibleIndex + visibleSize : toVisibleIndex + visibleSize + offsetSize + preloadSize
       }
-      scrollXStore.visibleStartIndex = toVisibleIndex
-      scrollXStore.visibleEndIndex = toVisibleIndex + visibleSize
+      scrollXStore.visibleStartIndex = toVisibleIndex - 1
+      scrollXStore.visibleEndIndex = toVisibleIndex + visibleSize + 1
       calculateMergerOffsetIndex(mergeList.concat(mergeFooterList), offsetItem, 'col')
       const { startIndex: offsetStartIndex, endIndex: offsetEndIndex } = offsetItem
       if (toVisibleIndex <= startIndex || toVisibleIndex >= endIndex - visibleSize - 1) {
@@ -3011,10 +3115,13 @@ export default defineComponent({
       internalData.visibleColumn = visibleColumn
       handleTableColumn()
       if (isReset) {
-        await $xeTable.updateFooter()
-        await $xeTable.recalculate()
-        $xeTable.updateCellAreas()
-        return await $xeTable.recalculate()
+        updateColumnOffsetLeft()
+        return $xeTable.updateFooter().then(() => {
+          return $xeTable.recalculate()
+        }).then(() => {
+          $xeTable.updateCellAreas()
+          return $xeTable.recalculate()
+        })
       }
       return $xeTable.updateFooter()
     }
@@ -3028,7 +3135,8 @@ export default defineComponent({
       })
     }
 
-    const handleColumn = async (collectColumn: VxeTableDefines.ColumnInfo[]) => {
+    const handleColumn = (collectColumn: VxeTableDefines.ColumnInfo[]) => {
+      const expandOpts = computeExpandOpts.value
       internalData.collectColumn = collectColumn
       const tableFullColumn = getColumnList(collectColumn)
       internalData.tableFullColumn = tableFullColumn
@@ -3037,33 +3145,36 @@ export default defineComponent({
       initColumnSort()
       await Promise.resolve(
         restoreCustomStorage()
-      )
-      cacheColumnMap()
-      parseColumns(true).then(() => {
-        if (reactData.scrollXLoad) {
-          loadScrollXData()
-        }
-      })
-      $xeTable.clearMergeCells()
-      $xeTable.clearMergeFooterItems()
-      $xeTable.handleTableData(true)
-      if (process.env.VUE_APP_VXE_ENV === 'development') {
-        if ((reactData.scrollXLoad || reactData.scrollYLoad) && reactData.expandColumn) {
+      ).then(() => {
+        const { scrollXLoad, scrollYLoad, expandColumn } = reactData
+        cacheColumnMap()
+        parseColumns(true).then(() => {
+          if (reactData.scrollXLoad) {
+            loadScrollXData()
+          }
+        })
+        $xeTable.clearMergeCells()
+        $xeTable.clearMergeFooterItems()
+        $xeTable.handleTableData(true)
+
+        if ((scrollXLoad || scrollYLoad) && (expandColumn && expandOpts.mode !== 'fixed')) {
           warnLog('vxe.error.scrollErrProp', ['column.type=expand'])
         }
-      }
-      await nextTick()
-      if ($xeToolbar) {
-        $xeToolbar.syncUpdate({
-          collectColumn: internalData.collectColumn,
-          $table: $xeTable
+
+        return nextTick().then(() => {
+          if ($xeToolbar) {
+            $xeToolbar.syncUpdate({
+              collectColumn: internalData.collectColumn,
+              $table: $xeTable
+            })
+          }
+          if ($xeTable.handleUpdateCustomColumn) {
+            $xeTable.handleUpdateCustomColumn()
+          }
+          reactData.isColLoading = false
+          return $xeTable.recalculate()
         })
-      }
-      if ($xeTable.handleUpdateCustomColumn) {
-        $xeTable.handleUpdateCustomColumn()
-      }
-      reactData.isColLoading = false
-      return await $xeTable.recalculate()
+      })
     }
 
     const updateScrollYStatus = (fullData?: any[]) => {
@@ -3165,9 +3276,9 @@ export default defineComponent({
       handleCheckedAllCheckboxRow(value)
       if (evnt) {
         dispatchEvent('checkbox-all', {
-          records: tableMethods.getCheckboxRecords(),
-          reserves: tableMethods.getCheckboxReserveRecords(),
-          indeterminates: tableMethods.getCheckboxIndeterminateRecords(),
+          records: $xeTable.getCheckboxRecords(),
+          reserves: $xeTable.getCheckboxReserveRecords(),
+          indeterminates: $xeTable.getCheckboxIndeterminateRecords(),
           checked: value
         }, evnt)
       }
@@ -3176,18 +3287,18 @@ export default defineComponent({
     /**
      * 纵向 Y 可视渲染处理
      */
-    const loadScrollYData = (scrollTop?: number) => {
-      const { mergeList, isAllOverflow } = reactData
+    const loadScrollYData = () => {
+      const { mergeList, isAllOverflow, isScrollYBig } = reactData
       const { scrollYStore } = internalData
       const { preloadSize, startIndex, endIndex, offsetSize } = scrollYStore
       const autoOffsetYSize = isAllOverflow ? offsetSize : offsetSize + 1
-      const { toVisibleIndex, visibleSize } = handleVirtualYVisible(scrollTop)
+      const { toVisibleIndex, visibleSize } = handleVirtualYVisible()
       const offsetItem = {
-        startIndex: Math.max(0, toVisibleIndex - 1 - offsetSize - preloadSize),
-        endIndex: toVisibleIndex + visibleSize + autoOffsetYSize + preloadSize
+        startIndex: Math.max(0, isScrollYBig ? toVisibleIndex - 1 : toVisibleIndex - 1 - offsetSize - preloadSize),
+        endIndex: isScrollYBig ? (toVisibleIndex + visibleSize) : (toVisibleIndex + visibleSize + autoOffsetYSize + preloadSize)
       }
-      scrollYStore.visibleStartIndex = toVisibleIndex
-      scrollYStore.visibleEndIndex = toVisibleIndex + visibleSize
+      scrollYStore.visibleStartIndex = toVisibleIndex - 1
+      scrollYStore.visibleEndIndex = toVisibleIndex + visibleSize + 1
       calculateMergerOffsetIndex(mergeList, offsetItem, 'row')
       const { startIndex: offsetStartIndex, endIndex: offsetEndIndex } = offsetItem
       if (toVisibleIndex <= startIndex || toVisibleIndex >= endIndex - visibleSize - 1) {
@@ -3289,6 +3400,7 @@ export default defineComponent({
             $xeTable.updateScrollYSpace()
           })
         }
+        updateRowExpandStyle()
         $xeTable.updateCellAreas()
       }, 200)
     }
@@ -3312,7 +3424,13 @@ export default defineComponent({
       return multiple
     }
 
-    const wheelScrollTo = (diffNum: number, cb: (progress: number) => void) => {
+    const wheelScrollLeftTo = (scrollLeft: number, cb: (offsetLeft: number) => void) => {
+      requestAnimationFrame(() => {
+        cb(scrollLeft)
+      })
+    }
+
+    const wheelScrollTopTo = (diffNum: number, cb: (progress: number) => void) => {
       const duration = Math.abs(diffNum)
       const startTime = performance.now()
       let countTop = 0
@@ -3371,6 +3489,103 @@ export default defineComponent({
         $xeTable.dispatchEvent('row-resizable-change', params, evnt)
         setTimeout(() => $xeTable.recalculate(true), 300)
       })
+    }
+
+    const updateColumnOffsetLeft = () => {
+      const { visibleColumn, fullColumnIdData } = internalData
+      let offsetLeft = 0
+      for (let cIndex = 0, rLen = visibleColumn.length; cIndex < rLen; cIndex++) {
+        const column = visibleColumn[cIndex]
+        const colid = column.id
+        const colRest = fullColumnIdData[colid]
+        colRest.oLeft = offsetLeft
+        offsetLeft += column.renderWidth
+      }
+    }
+
+    const updateRowOffsetTop = () => {
+      const { expandColumn, rowExpandedMaps } = reactData
+      const { afterFullData, fullAllDataRowIdData } = internalData
+      const expandOpts = computeExpandOpts.value
+      const rowOpts = computeRowOpts.value
+      const cellOpts = computeCellOpts.value
+      const defaultRowHeight = computeDefaultRowHeight.value
+      let offsetTop = 0
+      for (let rIndex = 0, rLen = afterFullData.length; rIndex < rLen; rIndex++) {
+        const row = afterFullData[rIndex]
+        const rowid = getRowid($xeTable, row)
+        const rowRest = fullAllDataRowIdData[rowid] || {}
+        rowRest.oTop = offsetTop
+        offsetTop += rowRest.resizeHeight || cellOpts.height || rowOpts.height || rowRest.height || defaultRowHeight
+        // 是否展开行
+        if (expandColumn && rowExpandedMaps[rowid]) {
+          offsetTop += rowRest.expandHeight || expandOpts.height || 0
+        }
+      }
+    }
+
+    const updateRowExpandStyle = () => {
+      const { expandColumn, scrollYLoad, scrollYTop, isScrollYBig } = reactData
+      const expandOpts = computeExpandOpts.value
+      const rowOpts = computeRowOpts.value
+      const cellOpts = computeCellOpts.value
+      const defaultRowHeight = computeDefaultRowHeight.value
+      const { mode } = expandOpts
+      if (expandColumn && mode === 'fixed') {
+        const { elemStore, fullAllDataRowIdData } = internalData
+        const rowExpandEl = refRowExpandElem.value
+        const bodyScrollElem = getRefElem(elemStore['main-body-scroll'])
+        if (rowExpandEl && bodyScrollElem) {
+          let isUpdateHeight = false
+          XEUtils.arrayEach(rowExpandEl.children, reEl => {
+            const expandEl = reEl as HTMLDivElement
+            const rowid = expandEl.getAttribute('rowid') || ''
+            const rowRest = fullAllDataRowIdData[rowid]
+            if (rowRest) {
+              const expandHeight = expandEl.offsetHeight + 1
+              const trEl = bodyScrollElem.querySelector(`.vxe-body--row[rowid="${rowid}"]`) as HTMLTableCellElement
+              let offsetTop = 0
+              if (scrollYLoad) {
+                if (isScrollYBig && trEl) {
+                  offsetTop = trEl.offsetTop + trEl.offsetHeight
+                } else {
+                  offsetTop = rowRest.oTop + (rowRest.resizeHeight || cellOpts.height || rowOpts.height || rowRest.height || defaultRowHeight)
+                }
+              } else {
+                if (trEl) {
+                  offsetTop = trEl.offsetTop + trEl.offsetHeight
+                }
+              }
+              if (isScrollYBig) {
+                offsetTop += scrollYTop
+              }
+              expandEl.style.top = toCssUnit(offsetTop)
+
+              if (!isUpdateHeight) {
+                if (rowRest.expandHeight !== expandHeight) {
+                  isUpdateHeight = true
+                }
+              }
+              rowRest.expandHeight = expandHeight
+            }
+          })
+          if (isUpdateHeight) {
+            reactData.rowExpandHeightFlag++
+            nextTick(() => {
+              updateRowOffsetTop()
+            })
+          }
+        }
+      }
+    }
+
+    const handleRowExpandScroll = () => {
+      const { elemStore } = internalData
+      const rowExpandEl = refRowExpandElem.value
+      const bodyScrollElem = getRefElem(elemStore['main-body-scroll'])
+      if (rowExpandEl && bodyScrollElem) {
+        rowExpandEl.scrollTop = bodyScrollElem.scrollTop
+      }
     }
 
     tableMethods = {
@@ -3531,7 +3746,7 @@ export default defineComponent({
           XEUtils.eachTree(rows, (childRow, index, items, path, parentItem, nodes) => {
             const rowid = getRowid($xeTable, childRow)
             const parentRow = parentItem || parentRest.row
-            const rest = { row: childRow, rowid, seq: -1, index, _index: -1, $index: -1, treeIndex: -1, items, parent: parentRow, level: parentLevel + nodes.length, height: 0, resizeHeight: 0, oTop: 0 }
+            const rest = { row: childRow, rowid, seq: -1, index, _index: -1, $index: -1, treeIndex: -1, items, parent: parentRow, level: parentLevel + nodes.length, height: 0, resizeHeight: 0, oTop: 0, expandHeight: 0 }
             fullDataRowIdData[rowid] = rest
             fullAllDataRowIdData[rowid] = rest
           }, { children: childrenField })
@@ -3962,7 +4177,7 @@ export default defineComponent({
        */
       getTreeRowChildren (rowOrRowid) {
         const { treeConfig } = props
-        const { fullDataRowIdData } = internalData
+        const { fullAllDataRowIdData } = internalData
         const treeOpts = computeTreeOpts.value
         const { transform, mapChildrenField } = treeOpts
         const childrenField = treeOpts.children || treeOpts.childrenField
@@ -3974,7 +4189,7 @@ export default defineComponent({
             rowid = getRowid($xeTable, rowOrRowid)
           }
           if (rowid) {
-            const rest = fullDataRowIdData[rowid]
+            const rest = fullAllDataRowIdData[rowid]
             const row = rest ? rest.row : null
             if (row) {
               return row[transform ? mapChildrenField : childrenField] || []
@@ -3988,7 +4203,7 @@ export default defineComponent({
        */
       getTreeParentRow (rowOrRowid) {
         const { treeConfig } = props
-        const { fullDataRowIdData } = internalData
+        const { fullAllDataRowIdData } = internalData
         if (rowOrRowid && treeConfig) {
           let rowid
           if (XEUtils.isString(rowOrRowid)) {
@@ -3997,7 +4212,7 @@ export default defineComponent({
             rowid = getRowid($xeTable, rowOrRowid)
           }
           if (rowid) {
-            const rest = fullDataRowIdData[rowid]
+            const rest = fullAllDataRowIdData[rowid]
             return rest ? rest.parent : null
           }
         }
@@ -4012,9 +4227,9 @@ export default defineComponent({
        * @param {String/Number} rowid 行主键
        */
       getRowById (cellValue) {
-        const { fullDataRowIdData } = internalData
+        const { fullAllDataRowIdData } = internalData
         const rowid = XEUtils.eqNull(cellValue) ? '' : encodeURIComponent(cellValue || '')
-        return fullDataRowIdData[rowid] ? fullDataRowIdData[rowid].row : null
+        return fullAllDataRowIdData[rowid] ? fullAllDataRowIdData[rowid].row : null
       },
       /**
        * 根据行获取行的唯一主键
@@ -4249,6 +4464,7 @@ export default defineComponent({
           }
         }
         return nextTick().then(() => {
+          updateRowOffsetTop()
           return { status }
         })
       },
@@ -4364,6 +4580,7 @@ export default defineComponent({
           const el = refElem.value
           if (el && el.clientWidth) {
             autoCellWidth()
+            updateRowExpandStyle()
           }
           if (rceTimeout) {
             clearTimeout(rceTimeout)
@@ -5069,15 +5286,15 @@ export default defineComponent({
        * @param {Array/Row} rows 行数据
        * @param {Boolean} expanded 是否展开
        */
-      async setRowExpand (rows, expanded) {
-        const { rowExpandedMaps, rowExpandLazyLoadedMaps, expandColumn: column } = reactData
+      setRowExpand (rows, expanded) {
+        const { rowExpandedMaps, rowExpandLazyLoadedMaps, expandColumn } = reactData
         const { fullAllDataRowIdData } = internalData
         let rExpandedMaps = { ...rowExpandedMaps }
         const expandOpts = computeExpandOpts.value
         const { reserve, lazy, accordion, toggleMethod } = expandOpts
         const lazyRests: any[] = []
-        const columnIndex = tableMethods.getColumnIndex(column)
-        const $columnIndex = tableMethods.getVMColumnIndex(column)
+        const columnIndex = $xeTable.getColumnIndex(expandColumn)
+        const $columnIndex = $xeTable.getVMColumnIndex(expandColumn)
         if (rows) {
           if (!XEUtils.isArray(rows)) {
             rows = [rows]
@@ -5087,7 +5304,7 @@ export default defineComponent({
             rExpandedMaps = {}
             rows = rows.slice(rows.length - 1, rows.length)
           }
-          const validRows: any[] = toggleMethod ? rows.filter((row: any) => toggleMethod({ $table: $xeTable, expanded, column, columnIndex, $columnIndex, row, rowIndex: tableMethods.getRowIndex(row), $rowIndex: tableMethods.getVMRowIndex(row) })) : rows
+          const validRows: any[] = toggleMethod ? rows.filter((row: any) => toggleMethod({ $table: $xeTable, expanded, column: expandColumn, columnIndex, $columnIndex, row, rowIndex: tableMethods.getRowIndex(row), $rowIndex: tableMethods.getVMRowIndex(row) })) : rows
           if (expanded) {
             validRows.forEach((row: any) => {
               const rowid = getRowid($xeTable, row)
@@ -5110,11 +5327,19 @@ export default defineComponent({
             })
           }
           if (reserve) {
-            validRows.forEach((row: any) => handleRowExpandReserve(row, expanded))
+            validRows.forEach((row) => handleRowExpandReserve(row, expanded))
           }
         }
         reactData.rowExpandedMaps = rExpandedMaps
-        return Promise.all(lazyRests).then(() => tableMethods.recalculate())
+        return Promise.all(lazyRests)
+          .then(() => nextTick())
+          .then(() => $xeTable.recalculate(true))
+          .then(() => {
+            updateRowOffsetTop()
+            updateRowExpandStyle()
+            handleRowExpandScroll()
+            return $xeTable.updateCellAreas()
+          })
       },
       /**
        * 判断行是否为展开状态
@@ -5139,15 +5364,20 @@ export default defineComponent({
         const { tableFullData } = internalData
         const expandOpts = computeExpandOpts.value
         const { reserve } = expandOpts
-        const expList = tableMethods.getRowExpandRecords()
+        const expList = $xeTable.getRowExpandRecords()
         reactData.rowExpandedMaps = {}
         if (reserve) {
           tableFullData.forEach((row) => handleRowExpandReserve(row, false))
         }
         return nextTick().then(() => {
           if (expList.length) {
-            tableMethods.recalculate()
+            return $xeTable.recalculate(true)
           }
+        }).then(() => {
+          updateRowOffsetTop()
+          updateRowExpandStyle()
+          handleRowExpandScroll()
+          return $xeTable.updateCellAreas()
         })
       },
       clearRowExpandReserve () {
@@ -5182,11 +5412,12 @@ export default defineComponent({
         return rowRest && !!rowRest.treeLoaded
       },
       clearTreeExpandLoaded (rows: any) {
-        const tExpandedMaps = { ...reactData.treeExpandedMaps }
         const { fullAllDataRowIdData } = internalData
         const treeOpts = computeTreeOpts.value
         const { transform } = treeOpts
+        let tExpandedMaps: Record<string, any> = {}
         if (rows) {
+          tExpandedMaps = { ...reactData.treeExpandedMaps }
           if (!XEUtils.isArray(rows)) {
             rows = [rows]
           }
@@ -5200,11 +5431,15 @@ export default defineComponent({
               }
             }
           })
+        } else {
+          XEUtils.each(fullAllDataRowIdData, (rowRest) => {
+            rowRest.treeLoaded = false
+          })
         }
-        reactData.treeExpandedMaps = tExpandedMaps
+        reactData.treeExpandedMaps = {}
         if (transform) {
           handleVirtualTreeToList()
-          return tablePrivateMethods.handleTableData()
+          return $xeTable.handleTableData()
         }
         return nextTick()
       },
@@ -5571,8 +5806,8 @@ export default defineComponent({
       updateCellAreas () {
         const { mouseConfig } = props
         const mouseOpts = computeMouseOpts.value
-        if (mouseConfig && mouseOpts.area && $xeTable.handleRecalculateCellAreas) {
-          return $xeTable.handleRecalculateCellAreas()
+        if (mouseConfig && mouseOpts.area && $xeTable.handleRecalculateCellAreaEvent) {
+          return $xeTable.handleRecalculateCellAreaEvent()
         }
         return nextTick()
       },
@@ -6337,8 +6572,8 @@ export default defineComponent({
       const wrapperRect = el.getBoundingClientRect()
       const osbWidth = overflowY ? scrollbarWidth : 0
       const osbHeight = overflowX ? scrollbarHeight : 0
-      const tableWidth = el.clientWidth
-      const tableHeight = el.clientHeight
+      const tableWrapperWidth = el.clientWidth
+      const tableWrapperHeight = el.clientHeight
       if (trEl) {
         const rdLineEl = refDragRowLineElem.value
         if (rdLineEl) {
@@ -6347,14 +6582,14 @@ export default defineComponent({
             const trRect = trEl.getBoundingClientRect()
             let trHeight = trEl.clientHeight
             const offsetTop = Math.max(1, trRect.y - wrapperRect.y)
-            if (offsetTop + trHeight > tableHeight - osbHeight) {
-              trHeight = tableHeight - offsetTop - osbHeight
+            if (offsetTop + trHeight > tableWrapperHeight - osbHeight) {
+              trHeight = tableWrapperHeight - offsetTop - osbHeight
             }
             rdLineEl.style.display = 'block'
             rdLineEl.style.left = `${scrollbarYToLeft ? osbWidth : 0}px`
             rdLineEl.style.top = `${offsetTop}px`
             rdLineEl.style.height = `${trHeight}px`
-            rdLineEl.style.width = `${tableWidth - osbWidth}px`
+            rdLineEl.style.width = `${tableWrapperWidth - osbWidth}px`
             rdLineEl.setAttribute('drag-pos', dragPos)
             rdLineEl.setAttribute('drag-to-child', prevDragToChild ? 'y' : 'n')
           } else {
@@ -6379,7 +6614,7 @@ export default defineComponent({
               thWidth -= startX - offsetLeft
               offsetLeft = startX
             }
-            const endX = tableWidth - rightContainerWidth - (rightContainerWidth ? 0 : osbWidth)
+            const endX = tableWrapperWidth - rightContainerWidth - (rightContainerWidth ? 0 : osbWidth)
             if (offsetLeft + thWidth > endX) {
               thWidth = endX - offsetLeft
             }
@@ -6390,7 +6625,7 @@ export default defineComponent({
             if (prevDragToChild) {
               cdLineEl.style.height = `${thRect.height}px`
             } else {
-              cdLineEl.style.height = `${tableHeight - offsetTop - (scrollbarXToTop ? 0 : osbHeight)}px`
+              cdLineEl.style.height = `${tableWrapperHeight - offsetTop - (scrollbarXToTop ? 0 : osbHeight)}px`
             }
             cdLineEl.setAttribute('drag-pos', dragPos)
             cdLineEl.setAttribute('drag-to-child', prevDragToChild ? 'y' : 'n')
@@ -6583,7 +6818,7 @@ export default defineComponent({
       /**
        * 更新数据行的 Map
        */
-      cacheRowMap (isReset, isSource) {
+      cacheRowMap () {
         const { treeConfig } = props
         const treeOpts = computeTreeOpts.value
         const { fullAllDataRowIdData, tableFullData, tableFullTreeData } = internalData
@@ -6593,7 +6828,7 @@ export default defineComponent({
         const isLazy = treeConfig && treeOpts.lazy
         const fullAllDataRowIdMaps: Record<string, VxeTableDefines.RowCacheItem> = {}
         const fullDataRowIdMaps: Record<string, VxeTableDefines.RowCacheItem> = {}
-        const handleRow = (row: any, index: any, items: any, path?: any[], parentRow?: any, nodes?: any[]) => {
+        const handleRow = (row: any, index: number, items: any, path?: any[], parentRow?: any, nodes?: any[]) => {
           let rowid = getRowid($xeTable, row)
           const seq = treeConfig && path ? toTreePathSeq(path) : index + 1
           const level = nodes ? nodes.length - 1 : 0
@@ -6604,23 +6839,19 @@ export default defineComponent({
           if (isLazy && row[hasChildField] && XEUtils.isUndefined(row[childrenField])) {
             row[childrenField] = null
           }
-          let cacheItem = fullAllDataRowIdData[rowid]
-          if (isReset || !cacheItem) {
-            cacheItem = { row, rowid, seq, index: -1, _index: -1, $index: -1, treeIndex: index, items, parent: parentRow, level, height: 0, resizeHeight: 0, oTop: 0 }
+          let rowRest = fullAllDataRowIdData[rowid]
+          if (!rowRest) {
+            rowRest = { row, rowid, seq, index: -1, _index: -1, $index: -1, treeIndex: index, items, parent: parentRow, level, height: 0, resizeHeight: 0, oTop: 0, expandHeight: 0 }
           }
-          cacheItem.row = row
-          cacheItem.items = items
-          cacheItem.parent = parentRow
-          cacheItem.level = level
-          cacheItem.index = treeConfig && parentRow ? -1 : index
-          if (isSource) {
-            fullDataRowIdMaps[rowid] = cacheItem
-          }
-          fullAllDataRowIdMaps[rowid] = cacheItem
+          rowRest.row = row
+          rowRest.items = items
+          rowRest.parent = parentRow
+          rowRest.level = level
+          rowRest.index = treeConfig && parentRow ? -1 : index
+          fullDataRowIdMaps[rowid] = rowRest
+          fullAllDataRowIdMaps[rowid] = rowRest
         }
-        if (isSource) {
-          internalData.fullDataRowIdData = fullDataRowIdMaps
-        }
+        internalData.fullDataRowIdData = fullDataRowIdMaps
         internalData.fullAllDataRowIdData = fullAllDataRowIdMaps
         if (treeConfig) {
           XEUtils.eachTree(tableFullTreeData, handleRow, { children: childrenField })
@@ -6782,7 +7013,7 @@ export default defineComponent({
           resizeBarElem.style.height = `${scrollbarXToTop ? tableHeight - osbHeight : tableHeight}px`
           if (resizableOpts.showDragTip && resizeTipElem) {
             resizeTipElem.textContent = getI18n('vxe.table.resizeColTip', [resizeColumn.renderWidth + (isRightFixed ? dragPosLeft - dragLeft : dragLeft - dragPosLeft)])
-            const tableWidth = tableEl.clientWidth
+            const tableWrapperWidth = tableEl.clientWidth
             const wrapperRect = wrapperElem.getBoundingClientRect()
             const resizeBarWidth = resizeBarElem.clientWidth
             const resizeTipWidth = resizeTipElem.clientWidth
@@ -6790,8 +7021,8 @@ export default defineComponent({
             let resizeTipLeft = -resizeTipWidth
             if (resizeBarLeft < resizeTipWidth + resizeBarWidth) {
               resizeTipLeft = 0
-            } else if (resizeBarLeft > tableWidth) {
-              resizeTipLeft += tableWidth - resizeBarLeft
+            } else if (resizeBarLeft > tableWrapperWidth) {
+              resizeTipLeft += tableWrapperWidth - resizeBarLeft
             }
             resizeTipElem.style.left = `${resizeTipLeft}px`
             resizeTipElem.style.top = `${Math.min(tableHeight - resizeTipHeight, Math.max(0, evnt.clientY - wrapperRect.y - resizeTipHeight / 2))}px`
@@ -6927,7 +7158,7 @@ export default defineComponent({
         const updateEvent = (evnt: MouseEvent) => {
           evnt.stopPropagation()
           evnt.preventDefault()
-          const tableWidth = tableEl.clientWidth - osbWidth
+          const rtWidth = tableEl.clientWidth - osbWidth
           const tableHeight = tableEl.clientHeight - osbHeight
           let dragTop = evnt.clientY - tableRect.y - targetOffsetY
           if (dragTop < minTop) {
@@ -6937,15 +7168,15 @@ export default defineComponent({
           }
           resizeBarElem.style.left = `${scrollbarYToLeft ? osbWidth : 0}px`
           resizeBarElem.style.top = `${dragTop}px`
-          resizeBarElem.style.width = `${tableWidth}px`
+          resizeBarElem.style.width = `${rtWidth}px`
           if (resizableOpts.showDragTip && resizeTipElem) {
             resizeTipElem.textContent = getI18n('vxe.table.resizeRowTip', [resizeHeight])
             const resizeTipWidth = resizeTipElem.clientWidth
             const resizeTipHeight = resizeTipElem.clientHeight
             let resizeBarLeft = Math.max(2, evnt.clientX - tableRect.x)
             let resizeBarTop = 0
-            if (resizeBarLeft + resizeTipWidth >= tableWidth - 2) {
-              resizeBarLeft = tableWidth - resizeTipWidth - 2
+            if (resizeBarLeft + resizeTipWidth >= rtWidth - 2) {
+              resizeBarLeft = rtWidth - resizeTipWidth - 2
             }
             if (dragTop + resizeTipHeight >= tableHeight) {
               resizeBarTop = tableHeight - (dragTop + resizeTipHeight)
@@ -6978,6 +7209,7 @@ export default defineComponent({
             } else {
               rowRest.resizeHeight = resizeHeight
               handleUpdateRowResize(evnt, resizeParams)
+              updateRowOffsetTop()
             }
           }
           removeClass(tableEl, 'row-drag--resize')
@@ -7173,7 +7405,7 @@ export default defineComponent({
             const isSelected = sLen >= vLen
             const halfSelect = !isSelected && (sLen >= 1 || hLen >= 1)
             if (checkField) {
-              XEUtils.get(row, checkField, isSelected)
+              XEUtils.set(row, checkField, isSelected)
             }
             if (isSelected) {
               if (!checkField) {
@@ -7205,8 +7437,8 @@ export default defineComponent({
         const { treeConfig } = props
         const { selectCheckboxMaps, treeIndeterminateMaps } = reactData
         const checkboxOpts = computeCheckboxOpts.value
-        const { checkField, checkMethod } = checkboxOpts
-        const { afterFullData, afterTreeFullData } = internalData
+        const { checkField, checkMethod, showReserveStatus } = checkboxOpts
+        const { afterFullData, afterTreeFullData, checkboxReserveRowMap } = internalData
 
         let sLen = 0 // 已选
         let hLen = 0 // 半选
@@ -7243,8 +7475,13 @@ export default defineComponent({
             vLen++
           })
 
-        const isSelected = vLen > 0 ? sLen >= vLen : sLen >= rootList.length
-        const halfSelect = !isSelected && (sLen >= 1 || hLen >= 1)
+        const isSelected = rootList.length > 0 ? (vLen > 0 ? (sLen >= vLen) : (sLen >= rootList.length)) : false
+        let halfSelect = !isSelected && (sLen >= 1 || hLen >= 1)
+
+        // 如果复选框启用保留记录，当保留数据存在时显示半选
+        if (!isSelected && !halfSelect && showReserveStatus) {
+          halfSelect = !XEUtils.isEmpty(checkboxReserveRowMap)
+        }
 
         reactData.isAllSelected = isSelected
         reactData.isIndeterminate = halfSelect
@@ -7909,6 +8146,7 @@ export default defineComponent({
             const dragParams = {
               oldRow: dragRow,
               newRow: prevDragRow,
+              dragRow,
               dragPos: prevDragPos as 'top' | 'bottom',
               dragToChild: !!prevDragToChild,
               offsetIndex: dragOffsetIndex as 0 | 1
@@ -8059,6 +8297,7 @@ export default defineComponent({
               dispatchEvent('row-dragend', {
                 oldRow: dragRow,
                 newRow: prevDragRow,
+                dragRow,
                 dragPos: prevDragPos as any,
                 dragToChild: isDragToChildFlag,
                 offsetIndex: dragOffsetIndex,
@@ -8199,11 +8438,12 @@ export default defineComponent({
         if (prevDragCol && dragCol) {
           // 判断是否有拖动
           if (prevDragCol !== dragCol) {
-            const oldColumn = dragCol
+            const dragColumn = dragCol
             const newColumn = prevDragCol
             const dragParams = {
-              oldColumn,
+              oldColumn: dragColumn,
               newColumn,
+              dragColumn,
               dragPos: prevDragPos as 'left' | 'right',
               dragToChild: !!prevDragToChild,
               offsetIndex: dragOffsetIndex as 0 | 1
@@ -8218,17 +8458,17 @@ export default defineComponent({
               let nafIndex = -1
 
               const oldAllMaps: Record<string, any> = {}
-              XEUtils.eachTree([oldColumn], column => {
+              XEUtils.eachTree([dragColumn], column => {
                 oldAllMaps[column.id] = column
               })
 
               let isSelfToChildStatus = false
 
-              if (oldColumn.parentId && newColumn.parentId) {
+              if (dragColumn.parentId && newColumn.parentId) {
                 // 子到子
 
                 if (isPeerDrag && !isCrossDrag) {
-                  if (oldColumn.parentId !== newColumn.parentId) {
+                  if (dragColumn.parentId !== newColumn.parentId) {
                     // 非同级
                     return
                   }
@@ -8250,7 +8490,7 @@ export default defineComponent({
                     }
                   }
                 }
-              } else if (oldColumn.parentId) {
+              } else if (dragColumn.parentId) {
                 // 子到根
 
                 if (!isCrossDrag) {
@@ -8278,18 +8518,18 @@ export default defineComponent({
                 // 根到根
               }
 
-              const oldewMatchRest = XEUtils.findTree(collectColumn, item => item.id === oldColumn.id)
+              const oldewMatchRest = XEUtils.findTree(collectColumn, item => item.id === dragColumn.id)
 
               // 改变层级
               if (isSelfToChildStatus && (isCrossDrag && isSelfToChildDrag)) {
                 if (oldewMatchRest) {
                   const { items: oCols, index: oIndex } = oldewMatchRest
-                  const childList = oldColumn.children || []
+                  const childList = dragColumn.children || []
                   childList.forEach(column => {
-                    column.parentId = oldColumn.parentId
+                    column.parentId = dragColumn.parentId
                   })
                   oCols.splice(oIndex, 1, ...childList)
-                  oldColumn.children = []
+                  dragColumn.children = []
                 }
               } else {
                 if (oldewMatchRest) {
@@ -8306,11 +8546,11 @@ export default defineComponent({
                 const { items: nCols, index: nIndex, parent: nParent } = newMatchRest
                 // 转子级
                 if ((isCrossDrag && isToChildDrag) && isDragToChildFlag) {
-                  oldColumn.parentId = newColumn.id
-                  newColumn.children = (newColumn.children || []).concat([oldColumn])
+                  dragColumn.parentId = newColumn.id
+                  newColumn.children = (newColumn.children || []).concat([dragColumn])
                 } else {
-                  oldColumn.parentId = newColumn.parentId
-                  nCols.splice(nIndex + dragOffsetIndex, 0, oldColumn)
+                  dragColumn.parentId = newColumn.parentId
+                  nCols.splice(nIndex + dragOffsetIndex, 0, dragColumn)
                 }
                 if (!nParent) {
                   nafIndex = nIndex
@@ -8336,8 +8576,9 @@ export default defineComponent({
               }
 
               dispatchEvent('column-dragend', {
-                oldColumn,
+                oldColumn: dragColumn,
                 newColumn,
+                dragColumn,
                 dragPos: prevDragPos,
                 dragToChild: isDragToChildFlag,
                 offsetIndex: dragOffsetIndex,
@@ -8417,21 +8658,21 @@ export default defineComponent({
           const scrollTargetEl = xHandleEl || tableBodyElem
           if (scrollTargetEl) {
             const wrapperRect = el.getBoundingClientRect()
-            const tableWidth = el.clientWidth
+            const tableWrapperWidth = el.clientWidth
             const leftContainerElem = refLeftContainer.value
             const leftContainerWidth = leftContainerElem ? leftContainerElem.clientWidth : 0
             const rightContainerElem = refRightContainer.value
             const rightContainerWidth = rightContainerElem ? rightContainerElem.clientWidth : 0
             const srartX = wrapperRect.x + leftContainerWidth
-            const endX = wrapperRect.x + tableWidth - rightContainerWidth
+            const endX = wrapperRect.x + tableWrapperWidth - rightContainerWidth
             const distSize = 28
             const startDistSize = clientX - srartX
             const endDistSize = endX - clientX
             if (startDistSize > 0 && startDistSize <= distSize) {
-              const scrollRatio = Math.floor(tableWidth / (startDistSize > distSize / 2 ? 240 : 120))
+              const scrollRatio = Math.floor(tableWrapperWidth / (startDistSize > distSize / 2 ? 240 : 120))
               scrollTargetEl.scrollLeft -= scrollRatio * (distSize - startDistSize)
             } else if (endDistSize > 0 && endDistSize <= distSize) {
-              const scrollRatio = Math.floor(tableWidth / (endDistSize > distSize / 2 ? 240 : 120))
+              const scrollRatio = Math.floor(tableWrapperWidth / (endDistSize > distSize / 2 ? 240 : 120))
               scrollTargetEl.scrollLeft += scrollRatio * (distSize - endDistSize)
             }
           }
@@ -8549,6 +8790,7 @@ export default defineComponent({
           direction,
           ...params
         }
+        updateRowExpandStyle()
         checkLastSyncScroll(isRollX, isRollY)
         if (rowOpts.isHover || highlightHoverRow) {
           $xeTable.clearHoverRow()
@@ -8587,7 +8829,11 @@ export default defineComponent({
         }
       },
       triggerBodyScrollEvent (evnt, fixedType) {
+        const { scrollYLoad, scrollXLoad } = reactData
         const { elemStore, intoRunScroll, lastScrollTop, lastScrollLeft, inWheelScroll, inVirtualScroll, inHeaderScroll, inBodyScroll, scrollRenderType, inFooterScroll } = internalData
+        if (inWheelScroll || inVirtualScroll || inHeaderScroll || inFooterScroll) {
+          return
+        }
         const xHandleEl = refScrollXHandleElem.value
         const yHandleEl = refScrollYHandleElem.value
         const leftScrollElem = getRefElem(elemStore['left-body-scroll'])
@@ -8595,9 +8841,7 @@ export default defineComponent({
         const rightScrollElem = getRefElem(elemStore['right-body-scroll'])
         const headerScrollElem = getRefElem(elemStore['main-header-scroll'])
         const footerScrollElem = getRefElem(elemStore['main-footer-scroll'])
-        if (inWheelScroll || inVirtualScroll || inHeaderScroll || inFooterScroll) {
-          return
-        }
+        const rowExpandEl = refRowExpandElem.value
         if (intoRunScroll) {
           return
         }
@@ -8641,13 +8885,18 @@ export default defineComponent({
             setScrollTop(rightScrollElem, scrollTop)
           }
           setScrollTop(yHandleEl, scrollTop)
-          $xeTable.triggerScrollYEvent(evnt)
+          setScrollTop(rowExpandEl, scrollTop)
+          if (scrollYLoad) {
+            $xeTable.triggerScrollYEvent(evnt)
+          }
         }
         if (isRollX) {
           setScrollLeft(xHandleEl, scrollLeft)
           setScrollLeft(headerScrollElem, scrollLeft)
           setScrollLeft(footerScrollElem, scrollLeft)
-          $xeTable.triggerScrollXEvent(evnt)
+          if (scrollXLoad) {
+            $xeTable.triggerScrollXEvent(evnt)
+          }
         }
         $xeTable.handleScrollEvent(evnt, isRollY, isRollX, scrollTop, scrollLeft, {
           type: 'body',
@@ -8655,15 +8904,16 @@ export default defineComponent({
         })
       },
       triggerHeaderScrollEvent (evnt, fixedType) {
+        const { scrollXLoad } = reactData
         const { elemStore, intoRunScroll, inWheelScroll, inVirtualScroll, inBodyScroll, inFooterScroll } = internalData
+        if (inWheelScroll || inVirtualScroll || inBodyScroll || inFooterScroll) {
+          return
+        }
         const yHandleEl = refScrollYHandleElem.value
         const xHandleEl = refScrollXHandleElem.value
         const bodyScrollElem = getRefElem(elemStore['main-body-scroll'])
         const headerScrollElem = getRefElem(elemStore['main-header-scroll'])
         const footerScrollElem = getRefElem(elemStore['main-footer-scroll'])
-        if (inWheelScroll || inVirtualScroll || inBodyScroll || inFooterScroll) {
-          return
-        }
         if (intoRunScroll) {
           return
         }
@@ -8684,22 +8934,25 @@ export default defineComponent({
         setScrollLeft(xHandleEl, scrollLeft)
         setScrollLeft(footerScrollElem, scrollLeft)
         setScrollLeft(bodyScrollElem, scrollLeft)
-        $xeTable.triggerScrollXEvent(evnt)
+        if (scrollXLoad) {
+          $xeTable.triggerScrollXEvent(evnt)
+        }
         $xeTable.handleScrollEvent(evnt, isRollY, isRollX, scrollTop, scrollLeft, {
           type: 'header',
           fixed: fixedType
         })
       },
       triggerFooterScrollEvent (evnt, fixedType) {
+        const { scrollXLoad } = reactData
         const { elemStore, intoRunScroll, inWheelScroll, inVirtualScroll, inHeaderScroll, inBodyScroll } = internalData
+        if (inWheelScroll || inVirtualScroll || inHeaderScroll || inBodyScroll) {
+          return
+        }
         const yHandleEl = refScrollYHandleElem.value
         const xHandleEl = refScrollXHandleElem.value
         const bodyScrollElem = getRefElem(elemStore['main-body-scroll'])
         const headerScrollElem = getRefElem(elemStore['main-header-scroll'])
         const footerScrollElem = getRefElem(elemStore['main-footer-scroll'])
-        if (inWheelScroll || inVirtualScroll || inHeaderScroll || inBodyScroll) {
-          return
-        }
         if (intoRunScroll) {
           return
         }
@@ -8720,26 +8973,38 @@ export default defineComponent({
         setScrollLeft(xHandleEl, scrollLeft)
         setScrollLeft(headerScrollElem, scrollLeft)
         setScrollLeft(bodyScrollElem, scrollLeft)
-        $xeTable.triggerScrollXEvent(evnt)
+        if (scrollXLoad) {
+          $xeTable.triggerScrollXEvent(evnt)
+        }
         $xeTable.handleScrollEvent(evnt, isRollY, isRollX, scrollTop, scrollLeft, {
           type: 'footer',
           fixed: fixedType
         })
       },
       triggerBodyWheelEvent (evnt) {
-        const { target, deltaY, deltaX } = evnt
+        const { target, deltaY, deltaX, shiftKey } = evnt
         if (target && /^textarea$/i.test((target as HTMLElement).tagName)) {
           return
         }
+
         const { highlightHoverRow } = tableProps
+        const { scrollXLoad, scrollYLoad } = reactData
+        const leftFixedWidth = computeLeftFixedWidth.value
+        const rightFixedWidth = computeRightFixedWidth.value
+        if (!(scrollYLoad || leftFixedWidth || rightFixedWidth)) {
+          return
+        }
+
         const { elemStore, lastScrollTop, lastScrollLeft } = internalData
         const rowOpts = computeRowOpts.value
         const xHandleEl = refScrollXHandleElem.value
         const yHandleEl = refScrollYHandleElem.value
         const leftScrollElem = getRefElem(elemStore['left-body-scroll'])
+        const headerScrollElem = getRefElem(elemStore['main-header-scroll'])
         const bodyScrollElem = getRefElem(elemStore['main-body-scroll'])
+        const footerScrollElem = getRefElem(elemStore['main-footer-scroll'])
         const rightScrollElem = getRefElem(elemStore['right-body-scroll'])
-
+        const rowExpandEl = refRowExpandElem.value
         if (!xHandleEl) {
           return
         }
@@ -8749,9 +9014,10 @@ export default defineComponent({
         if (!bodyScrollElem) {
           return
         }
+
         const wheelSpeed = getWheelSpeed(reactData.lastScrollTime)
-        const deltaTop = deltaY * wheelSpeed
-        const deltaLeft = deltaX * wheelSpeed
+        const deltaTop = Math.ceil((shiftKey ? deltaX : deltaY) * wheelSpeed)
+        const deltaLeft = Math.ceil((shiftKey ? deltaY : deltaX) * wheelSpeed)
 
         const isTopWheel = deltaTop < 0
         const currScrollTop = bodyScrollElem.scrollTop
@@ -8760,46 +9026,55 @@ export default defineComponent({
           return
         }
 
-        const scrollTop = bodyScrollElem.scrollTop + deltaTop
+        const scrollTop = currScrollTop + deltaTop
         const scrollLeft = bodyScrollElem.scrollLeft + deltaLeft
         const isRollX = scrollLeft !== lastScrollLeft
         const isRollY = scrollTop !== lastScrollTop
 
+        if (rowOpts.isHover || highlightHoverRow) {
+          $xeTable.clearHoverRow()
+        }
         // 用于鼠标纵向滚轮处理
+        if (isRollX) {
+          evnt.preventDefault()
+          internalData.inWheelScroll = true
+          wheelScrollLeftTo(scrollLeft, (offsetLeft: number) => {
+            const currLeftNum = offsetLeft
+            setScrollLeft(xHandleEl, currLeftNum)
+            setScrollLeft(bodyScrollElem, currLeftNum)
+            setScrollLeft(headerScrollElem, currLeftNum)
+            setScrollLeft(footerScrollElem, currLeftNum)
+            if (scrollXLoad) {
+              $xeTable.triggerScrollXEvent(evnt)
+            }
+            $xeTable.handleScrollEvent(evnt, isRollY, isRollX, bodyScrollElem.scrollTop, currLeftNum, {
+              type: 'table',
+              fixed: ''
+            })
+          })
+        }
         if (isRollY) {
           evnt.preventDefault()
-          if (rowOpts.isHover || highlightHoverRow) {
-            $xeTable.clearHoverRow()
-          }
-
-          wheelScrollTo(scrollTop - bodyScrollElem.scrollTop, (offsetTop: number) => {
+          wheelScrollTopTo(scrollTop - currScrollTop, (offsetTop: number) => {
             const currTopNum = bodyScrollElem.scrollTop + offsetTop
             internalData.inWheelScroll = true
             setScrollTop(yHandleEl, currTopNum)
             setScrollTop(bodyScrollElem, currTopNum)
             setScrollTop(leftScrollElem, currTopNum)
             setScrollTop(rightScrollElem, currTopNum)
-            $xeTable.triggerScrollYEvent(evnt)
-            $xeTable.handleScrollEvent(evnt, isRollY, isRollX, currTopNum, scrollLeft, {
+            setScrollTop(rowExpandEl, currTopNum)
+            if (scrollYLoad) {
+              $xeTable.triggerScrollYEvent(evnt)
+            }
+            $xeTable.handleScrollEvent(evnt, isRollY, isRollX, currTopNum, bodyScrollElem.scrollLeft, {
               type: 'table',
               fixed: ''
             })
           })
-
-          // internalData.inWheelScroll = true
-          // setScrollTop(yHandleEl, scrollTop)
-          // setScrollTop(bodyScrollElem, scrollTop)
-          // setScrollTop(leftScrollElem, scrollTop)
-          // setScrollTop(rightScrollElem, scrollTop)
-
-          // loadScrollYData(scrollTop)
-          // $xeTable.handleScrollEvent(evnt, isRollY, isRollX, scrollTop, scrollLeft, {
-          //   type: 'footer',
-          //   fixed: ''
-          // })
         }
       },
       triggerVirtualScrollXEvent (evnt) {
+        const { scrollXLoad } = reactData
         const { elemStore, inWheelScroll, lastScrollTop, inHeaderScroll, inBodyScroll, inFooterScroll } = internalData
         if (inHeaderScroll || inBodyScroll || inFooterScroll) {
           return
@@ -8825,13 +9100,16 @@ export default defineComponent({
         setScrollLeft(bodyScrollElem, scrollLeft)
         setScrollLeft(headerScrollElem, scrollLeft)
         setScrollLeft(footerScrollElem, scrollLeft)
-        $xeTable.triggerScrollXEvent(evnt)
+        if (scrollXLoad) {
+          $xeTable.triggerScrollXEvent(evnt)
+        }
         $xeTable.handleScrollEvent(evnt, isRollY, isRollX, scrollTop, scrollLeft, {
           type: 'table',
           fixed: ''
         })
       },
       triggerVirtualScrollYEvent (evnt) {
+        const { scrollYLoad } = reactData
         const { elemStore, inWheelScroll, lastScrollLeft, inHeaderScroll, inBodyScroll, inFooterScroll } = internalData
         if (inHeaderScroll || inBodyScroll || inFooterScroll) {
           return
@@ -8842,6 +9120,7 @@ export default defineComponent({
         const leftScrollElem = getRefElem(elemStore['left-body-scroll'])
         const bodyScrollElem = getRefElem(elemStore['main-body-scroll'])
         const rightScrollElem = getRefElem(elemStore['right-body-scroll'])
+        const rowExpandEl = refRowExpandElem.value
         const xHandleEl = refScrollXHandleElem.value
         const wrapperEl = evnt.currentTarget as HTMLDivElement
         const { scrollTop } = wrapperEl
@@ -8857,7 +9136,10 @@ export default defineComponent({
         setScrollTop(bodyScrollElem, scrollTop)
         setScrollTop(leftScrollElem, scrollTop)
         setScrollTop(rightScrollElem, scrollTop)
-        $xeTable.triggerScrollYEvent(evnt)
+        setScrollTop(rowExpandEl, scrollTop)
+        if (scrollYLoad) {
+          $xeTable.triggerScrollYEvent(evnt)
+        }
         $xeTable.handleScrollEvent(evnt, isRollY, isRollX, scrollTop, scrollLeft, {
           type: 'table',
           fixed: ''
@@ -8890,43 +9172,70 @@ export default defineComponent({
       updateScrollYStatus,
       // 更新横向 X 可视渲染上下剩余空间大小
       updateScrollXSpace () {
-        const { isGroup, scrollXLoad } = reactData
-        const { visibleColumn, scrollXStore, elemStore, tableWidth } = internalData
-        const tableHeader = refTableHeader.value
+        const { isGroup, scrollXLoad, overflowX, scrollXWidth } = reactData
+        const { visibleColumn, scrollXStore, elemStore, fullColumnIdData } = internalData
         const tableBody = refTableBody.value
-        const tableFooter = refTableFooter.value
         const tableBodyElem = tableBody ? tableBody.$el as HTMLDivElement : null
         if (tableBodyElem) {
-          const tableHeaderElem = tableHeader ? tableHeader.$el as HTMLDivElement : null
-          const tableFooterElem = tableFooter ? tableFooter.$el as HTMLDivElement : null
-          const headerElem = tableHeaderElem ? tableHeaderElem.querySelector('.vxe-table--header') as HTMLTableElement : null
-          const bodyElem = tableBodyElem.querySelector('.vxe-table--body') as HTMLTableElement
-          const footerElem = tableFooterElem ? tableFooterElem.querySelector('.vxe-table--footer') as HTMLTableElement : null
-          const leftSpaceWidth = visibleColumn.slice(0, scrollXStore.startIndex).reduce((previous, column) => previous + column.renderWidth, 0)
+          const bodyScrollElem = getRefElem(elemStore['main-body-scroll'])
+          const bodyTableElem = getRefElem(elemStore['main-body-table'])
+          const headerTableElem = getRefElem(elemStore['main-header-table'])
+          const footerTableElem = getRefElem(elemStore['main-footer-table'])
+
+          let xSpaceLeft = 0
+          const firstColumn = visibleColumn[scrollXStore.startIndex]
+          if (firstColumn) {
+            const colRest = fullColumnIdData[firstColumn.id] || {}
+            xSpaceLeft = colRest.oLeft
+          }
+
+          let clientWidth = 0
+          if (bodyScrollElem) {
+            clientWidth = bodyScrollElem.clientWidth
+          }
+          // 虚拟渲染
+          let isScrollXBig = false
+          let ySpaceWidth = scrollXWidth
+          if (scrollXWidth > maxXWidth) {
+            // 触右
+            if (bodyScrollElem && bodyTableElem && bodyScrollElem.scrollLeft + clientWidth >= maxXWidth) {
+              xSpaceLeft = maxXWidth - bodyTableElem.clientWidth
+            } else {
+              xSpaceLeft = (maxXWidth - clientWidth) * (xSpaceLeft / (scrollXWidth - clientWidth))
+            }
+            ySpaceWidth = maxXWidth
+            isScrollXBig = true
+          }
+
           let marginLeft = ''
-          if (scrollXLoad) {
-            marginLeft = `${leftSpaceWidth}px`
+          if (scrollXLoad && overflowX) {
+            marginLeft = `${xSpaceLeft}px`
           }
-          if (headerElem) {
-            headerElem.style.marginLeft = isGroup ? '' : marginLeft
+          if (headerTableElem) {
+            headerTableElem.style.marginLeft = isGroup ? '' : marginLeft
           }
-          bodyElem.style.marginLeft = marginLeft
-          if (footerElem) {
-            footerElem.style.marginLeft = marginLeft
+          if (bodyTableElem) {
+            bodyTableElem.style.marginLeft = marginLeft
           }
+          if (footerTableElem) {
+            footerTableElem.style.marginLeft = marginLeft
+          }
+
+          reactData.isScrollXBig = isScrollXBig
+
           const containerList = ['main']
           containerList.forEach(name => {
             const layoutList = ['header', 'body', 'footer']
             layoutList.forEach(layout => {
               const xSpaceElem = getRefElem(elemStore[`${name}-${layout}-xSpace`])
               if (xSpaceElem) {
-                xSpaceElem.style.width = scrollXLoad ? `${tableWidth}px` : ''
+                xSpaceElem.style.width = scrollXLoad ? `${ySpaceWidth}px` : ''
               }
             })
           })
           const scrollXSpaceEl = refScrollXSpaceElem.value
           if (scrollXSpaceEl) {
-            scrollXSpaceEl.style.width = `${tableWidth}px`
+            scrollXSpaceEl.style.width = `${ySpaceWidth}px`
           }
           nextTick(() => {
             updateStyle()
@@ -8934,47 +9243,72 @@ export default defineComponent({
         }
       },
       // 更新纵向 Y 可视渲染上下剩余空间大小
-      async updateScrollYSpace () {
-        const { isAllOverflow, scrollYLoad } = reactData
+      updateScrollYSpace () {
+        const { isAllOverflow, scrollYLoad, expandColumn, rowExpandedMaps } = reactData
         const { scrollYStore, elemStore, isResizeCellHeight, afterFullData, fullAllDataRowIdData } = internalData
         const { startIndex } = scrollYStore
+        const expandOpts = computeExpandOpts.value
         const rowOpts = computeRowOpts.value
         const cellOpts = computeCellOpts.value
         const defaultRowHeight = computeDefaultRowHeight.value
+        const bodyScrollElem = getRefElem(elemStore['main-body-scroll'])
         const bodyTableElem = getRefElem(elemStore['main-body-table'])
         const containerList = ['main', 'left', 'right']
-        let topSpaceHeight = 0
-        let ySpaceHeight = 0
-
+        let ySpaceTop = 0
+        let scrollYHeight = 0
+        let isScrollYBig = false
         if (scrollYLoad) {
           const isCustomCellHeight = isResizeCellHeight || cellOpts.height || rowOpts.height
-          if (!isCustomCellHeight && isAllOverflow) {
-            ySpaceHeight = afterFullData.length * defaultRowHeight
-            topSpaceHeight = Math.max(0, startIndex * defaultRowHeight)
-          } else {
-            for (let i = 0; i < afterFullData.length; i++) {
-              const row = afterFullData[i]
-              const rowid = getRowid($xeTable, row)
-              const rowRest = fullAllDataRowIdData[rowid] || {}
-              ySpaceHeight += rowRest.resizeHeight || cellOpts.height || rowOpts.height || rowRest.height || defaultRowHeight
+          if (!isCustomCellHeight && !expandColumn && isAllOverflow) {
+            scrollYHeight = afterFullData.length * defaultRowHeight
+            if (scrollYHeight > maxYHeight) {
+              isScrollYBig = true
             }
-            for (let i = 0; i < startIndex; i++) {
-              const row = afterFullData[i]
-              const rowid = getRowid($xeTable, row)
-              const rowRest = fullAllDataRowIdData[rowid] || {}
-              topSpaceHeight += rowRest.resizeHeight || cellOpts.height || rowOpts.height || rowRest.height || defaultRowHeight
+            ySpaceTop = Math.max(0, startIndex * defaultRowHeight)
+          } else {
+            const firstRow = afterFullData[startIndex]
+            let rowid = getRowid($xeTable, firstRow)
+            let rowRest = fullAllDataRowIdData[rowid] || {}
+            ySpaceTop = rowRest.oTop
+
+            const lastRow = afterFullData[afterFullData.length - 1]
+            rowid = getRowid($xeTable, lastRow)
+            rowRest = fullAllDataRowIdData[rowid] || {}
+            scrollYHeight = rowRest.oTop + (rowRest.resizeHeight || cellOpts.height || rowOpts.height || rowRest.height || defaultRowHeight)
+            // 是否展开行
+            if (expandColumn && rowExpandedMaps[rowid]) {
+              scrollYHeight += rowRest.expandHeight || expandOpts.height || 0
+            }
+            if (scrollYHeight > maxYHeight) {
+              isScrollYBig = true
             }
           }
         } else {
           if (bodyTableElem) {
-            ySpaceHeight = bodyTableElem.clientHeight
+            scrollYHeight = bodyTableElem.clientHeight
           }
+        }
+        let clientHeight = 0
+        if (bodyScrollElem) {
+          clientHeight = bodyScrollElem.clientHeight
+        }
+        // 虚拟渲染
+        let ySpaceHeight = scrollYHeight
+        let scrollYTop = ySpaceTop
+        if (isScrollYBig) {
+          // 触底
+          if (bodyScrollElem && bodyTableElem && bodyScrollElem.scrollTop + clientHeight >= maxYHeight) {
+            scrollYTop = maxYHeight - bodyTableElem.clientHeight
+          } else {
+            scrollYTop = (maxYHeight - clientHeight) * (ySpaceTop / (scrollYHeight - clientHeight))
+          }
+          ySpaceHeight = maxYHeight
         }
         containerList.forEach(name => {
           const layoutList = ['header', 'body', 'footer']
           const tableElem = getRefElem(elemStore[`${name}-body-table`])
           if (tableElem) {
-            tableElem.style.marginTop = topSpaceHeight ? `${topSpaceHeight}px` : ''
+            tableElem.style.marginTop = scrollYTop ? `${scrollYTop}px` : ''
           }
           layoutList.forEach(layout => {
             const ySpaceElem = getRefElem(elemStore[`${name}-${layout}-ySpace`])
@@ -8987,6 +9321,13 @@ export default defineComponent({
         if (scrollYSpaceEl) {
           scrollYSpaceEl.style.height = ySpaceHeight ? `${ySpaceHeight}px` : ''
         }
+        const rowExpandYSpaceEl = refRowExpandYSpaceElem.value
+        if (rowExpandYSpaceEl) {
+          rowExpandYSpaceEl.style.height = ySpaceHeight ? `${ySpaceHeight}px` : ''
+        }
+        reactData.scrollYTop = scrollYTop
+        reactData.scrollYHeight = scrollYHeight
+        reactData.isScrollYBig = isScrollYBig
         return nextTick().then(() => {
           updateStyle()
         })
@@ -8994,6 +9335,7 @@ export default defineComponent({
       async updateScrollXData () {
         const { isAllOverflow } = reactData
         handleTableColumn()
+        $xeTable.updateScrollYSpace()
         return nextTick().then(() => {
           handleTableColumn()
           $xeTable.updateScrollXSpace()
@@ -9004,6 +9346,7 @@ export default defineComponent({
       },
       async updateScrollYData () {
         $xeTable.handleTableData()
+        $xeTable.updateScrollYSpace()
         return nextTick().then(() => {
           $xeTable.handleTableData()
           $xeTable.updateScrollYSpace()
@@ -9055,7 +9398,7 @@ export default defineComponent({
         const el = refElem.value
         tablePrivateMethods.clearHoverRow()
         if (el) {
-          XEUtils.arrayEach(el.querySelectorAll(`[rowid="${rowid}"]`), elem => addClass(elem, 'row--hover'))
+          XEUtils.arrayEach(el.querySelectorAll(`.vxe-body--row[rowid="${rowid}"]`), elem => addClass(elem, 'row--hover'))
         }
         internalData.hoverRow = row
       },
@@ -9236,6 +9579,73 @@ export default defineComponent({
       return renderEmptyElement($xeTable)
     }
 
+    const renderRowExpandedVNs = () => {
+      const { treeConfig } = props
+      const { expandColumn } = reactData
+      const tableRowExpandedList = computeTableRowExpandedList.value
+      const expandOpts = computeExpandOpts.value
+      const { mode } = expandOpts
+      if (mode !== 'fixed') {
+        return renderEmptyElement($xeTable)
+      }
+      const expandVNs = [
+        h('div', {
+          key: 'repY',
+          ref: refRowExpandYSpaceElem
+        })
+      ]
+
+      if (expandColumn) {
+        tableRowExpandedList.forEach((row) => {
+          const expandOpts = computeExpandOpts.value
+          const { height: expandHeight, padding } = expandOpts
+          const { fullAllDataRowIdData } = internalData
+          const treeOpts = computeTreeOpts.value
+          const { transform, seqMode } = treeOpts
+          const cellStyle: Record<string, string> = {}
+          const rowid = getRowid($xeTable, row)
+          const rest = fullAllDataRowIdData[rowid]
+          let rowLevel = 0
+          let seq: string | number = -1
+          let _rowIndex = 0
+          const rowIndex = $xeTable.getRowIndex(row)
+          const $rowIndex = $xeTable.getVMRowIndex(row)
+          if (rest) {
+            rowLevel = rest.level
+            if (treeConfig && transform && seqMode === 'increasing') {
+              seq = rest._index + 1
+            } else {
+              seq = rest.seq
+            }
+            _rowIndex = rest._index
+          }
+          if (expandHeight) {
+            cellStyle.height = `${expandHeight}px`
+          }
+          if (treeConfig) {
+            cellStyle.paddingLeft = `${(rowLevel * treeOpts.indent) + 30}px`
+          }
+          const expandParams = { $table: $xeTable, seq, column: expandColumn, fixed: '', type: 'body', level: rowLevel, row, rowIndex, $rowIndex, _rowIndex }
+          expandVNs.push(
+            h('div', {
+              key: rowid,
+              class: ['vxe-body--row-expanded-cell', {
+                'is--padding': padding,
+                'is--ellipsis': expandHeight
+              }],
+              rowid,
+              style: cellStyle
+            }, expandColumn.renderData(expandParams))
+          )
+        })
+      }
+
+      return h('div', {
+        ref: refRowExpandElem,
+        class: 'vxe-table--row-expanded-wrapper'
+      }, expandVNs)
+    }
+
     const renderScrollX = () => {
       return h('div', {
         key: 'vsx',
@@ -9303,6 +9713,7 @@ export default defineComponent({
       const { showHeader, showFooter } = props
       const { overflowX, tableData, tableColumn, tableGroupColumn, footerTableData, columnStore } = reactData
       const { leftList, rightList } = columnStore
+
       return h('div', {
         ref: refTableViewportElem,
         class: 'vxe-table--viewport-wrapper'
@@ -9345,7 +9756,8 @@ export default defineComponent({
         }, [
           leftList && leftList.length && overflowX ? renderFixed('left') : renderEmptyElement($xeTable),
           rightList && rightList.length && overflowX ? renderFixed('right') : renderEmptyElement($xeTable)
-        ])
+        ]),
+        renderRowExpandedVNs()
       ])
     }
 
@@ -9639,8 +10051,9 @@ export default defineComponent({
       if (value && value.length >= 50000) {
         warnLog('vxe.error.errLargeData', ['loadData(data), reloadData(data)'])
       }
-      loadTableData(value, true).then(() => {
+      loadTableData(value, false).then(() => {
         const { scrollXLoad, scrollYLoad, expandColumn } = reactData
+        const expandOpts = computeExpandOpts.value
         internalData.inited = true
         internalData.initStatus = true
         if (!initStatus) {
@@ -9651,7 +10064,7 @@ export default defineComponent({
         // if (checkboxColumn && internalData.tableFullData.length > 300 && !checkboxOpts.checkField) {
         //   warnLog('vxe.error.checkProp', ['checkbox-config.checkField'])
         // }
-        if ((scrollXLoad || scrollYLoad) && expandColumn) {
+        if ((scrollXLoad || scrollYLoad) && (expandColumn && expandOpts.mode !== 'fixed')) {
           warnLog('vxe.error.scrollErrProp', ['column.type=expand'])
         }
         return tableMethods.recalculate()
@@ -9700,6 +10113,12 @@ export default defineComponent({
       reScrollFlag.value++
     })
     watch(() => props.showFooter, () => {
+      reScrollFlag.value++
+    })
+    watch(() => reactData.overflowX, () => {
+      reScrollFlag.value++
+    })
+    watch(() => reactData.overflowY, () => {
       reScrollFlag.value++
     })
     watch(reScrollFlag, () => {
@@ -9809,34 +10228,16 @@ export default defineComponent({
     })
 
     onMounted(() => {
-      const { rowHeightStore } = reactData
-      const varEl = refVarElem.value
       const columnOpts = computeColumnOpts.value
       const rowOpts = computeRowOpts.value
       const customOpts = computeCustomOpts.value
-
-      if (varEl) {
-        const [defEl, mediumEl, smallEl, miniEl] = varEl.children
-        if (defEl) {
-          rowHeightStore.default = defEl.clientHeight
-        }
-        if (mediumEl) {
-          rowHeightStore.medium = mediumEl.clientHeight
-        }
-        if (smallEl) {
-          rowHeightStore.small = smallEl.clientHeight
-        }
-        if (miniEl) {
-          rowHeightStore.mini = miniEl.clientHeight
-        }
-      }
 
       if (columnOpts.drag || rowOpts.drag || customOpts.allowSort) {
         initTpImg()
       }
 
       nextTick(() => {
-        const { data, treeConfig, showOverflow } = props
+        const { data, exportConfig, importConfig, treeConfig, showOverflow } = props
         const { scrollXStore, scrollYStore } = internalData
         const sYOpts = computeSYOpts.value
         const editOpts = computeEditOpts.value
@@ -9845,132 +10246,124 @@ export default defineComponent({
         const checkboxOpts = computeCheckboxOpts.value
         const expandOpts = computeExpandOpts.value
         const rowOpts = computeRowOpts.value
+        const customOpts = computeCustomOpts.value
+        const mouseOpts = computeMouseOpts.value
+        const exportOpts = computeExportOpts.value
+        const importOpts = computeImportOpts.value
 
-        if (process.env.VUE_APP_VXE_ENV === 'development') {
-          if (props.rowId) {
-            warnLog('vxe.error.delProp', ['row-id', 'row-config.keyField'])
-          }
-          if (props.rowKey) {
-            warnLog('vxe.error.delProp', ['row-key', 'row-config.useKey'])
-          }
-          if (props.columnKey) {
-            warnLog('vxe.error.delProp', ['column-id', 'column-config.useKey'])
-          }
-          if (!(props.rowId || rowOpts.keyField) && (checkboxOpts.reserve || checkboxOpts.checkRowKeys || radioOpts.reserve || radioOpts.checkRowKey || expandOpts.expandRowKeys || treeOpts.expandRowKeys)) {
-            warnLog('vxe.error.reqProp', ['row-config.keyField'])
-          }
-          if (props.editConfig && (editOpts.showStatus || editOpts.showUpdateStatus || editOpts.showInsertStatus) && !props.keepSource) {
-            warnLog('vxe.error.reqProp', ['keep-source'])
-          }
-          if (treeConfig && (treeOpts.showLine || treeOpts.line) && (!(props.rowKey || rowOpts.useKey) || !showOverflow)) {
-            warnLog('vxe.error.reqProp', ['row-config.useKey | show-overflow'])
-          }
-          if (treeConfig && !treeOpts.transform && props.stripe) {
-            warnLog('vxe.error.noTree', ['stripe'])
-          }
-          if (props.showFooter && !(props.footerMethod || props.footerData)) {
-            warnLog('vxe.error.reqProp', ['footer-data | footer-method'])
-          }
-          if (rowOpts.height) {
-            warnLog('vxe.error.delProp', ['row-config.height', 'cell-config.height'])
-          }
-          // if (props.highlightCurrentRow) {
-          //   warnLog('vxe.error.delProp', ['highlight-current-row', 'row-config.isCurrent'])
-          // }
-          // if (props.highlightHoverRow) {
-          //   warnLog('vxe.error.delProp', ['highlight-hover-row', 'row-config.isHover'])
-          // }
-          // if (props.highlightCurrentColumn) {
-          //   warnLog('vxe.error.delProp', ['highlight-current-column', 'column-config.isCurrent'])
-          // }
-          // if (props.highlightHoverColumn) {
-          //   warnLog('vxe.error.delProp', ['highlight-hover-column', 'column-config.isHover'])
-          // }
-          // 检查导入导出类型，如果自定义导入导出方法，则不校验类型
-          const { exportConfig, importConfig } = props
-          const exportOpts = computeExportOpts.value
-          const importOpts = computeImportOpts.value
-          if (importConfig && importOpts.types && !importOpts.importMethod && !XEUtils.includeArrays(XEUtils.keys(importOpts._typeMaps), importOpts.types)) {
-            warnLog('vxe.error.errProp', [`export-config.types=${importOpts.types.join(',')}`, importOpts.types.filter((type: string) => XEUtils.includes(XEUtils.keys(importOpts._typeMaps), type)).join(',') || XEUtils.keys(importOpts._typeMaps).join(',')])
-          }
-          if (exportConfig && exportOpts.types && !exportOpts.exportMethod && !XEUtils.includeArrays(XEUtils.keys(exportOpts._typeMaps), exportOpts.types)) {
-            warnLog('vxe.error.errProp', [`export-config.types=${exportOpts.types.join(',')}`, exportOpts.types.filter((type: string) => XEUtils.includes(XEUtils.keys(exportOpts._typeMaps), type)).join(',') || XEUtils.keys(exportOpts._typeMaps).join(',')])
-          }
+        if (props.rowId) {
+          warnLog('vxe.error.delProp', ['row-id', 'row-config.keyField'])
+        }
+        if (props.rowKey) {
+          warnLog('vxe.error.delProp', ['row-key', 'row-config.useKey'])
+        }
+        if (props.columnKey) {
+          warnLog('vxe.error.delProp', ['column-id', 'column-config.useKey'])
+        }
+        if (!(props.rowId || rowOpts.keyField) && (checkboxOpts.reserve || checkboxOpts.checkRowKeys || radioOpts.reserve || radioOpts.checkRowKey || expandOpts.expandRowKeys || treeOpts.expandRowKeys)) {
+          warnLog('vxe.error.reqProp', ['row-config.keyField'])
+        }
+        if (props.editConfig && (editOpts.showStatus || editOpts.showUpdateStatus || editOpts.showInsertStatus) && !props.keepSource) {
+          warnLog('vxe.error.reqProp', ['keep-source'])
+        }
+        if (treeConfig && (treeOpts.showLine || treeOpts.line) && (!(props.rowKey || rowOpts.useKey) || !showOverflow)) {
+          warnLog('vxe.error.reqProp', ['row-config.useKey | show-overflow'])
+        }
+        if (treeConfig && !treeOpts.transform && props.stripe) {
+          warnLog('vxe.error.noTree', ['stripe'])
+        }
+        if (props.showFooter && !(props.footerMethod || props.footerData)) {
+          warnLog('vxe.error.reqProp', ['footer-data | footer-method'])
+        }
+        if (rowOpts.height) {
+          warnLog('vxe.error.delProp', ['row-config.height', 'cell-config.height'])
+        }
+        if (props.highlightCurrentRow) {
+          warnLog('vxe.error.delProp', ['highlight-current-row', 'row-config.isCurrent'])
+        }
+        if (props.highlightHoverRow) {
+          warnLog('vxe.error.delProp', ['highlight-hover-row', 'row-config.isHover'])
+        }
+        if (props.highlightCurrentColumn) {
+          warnLog('vxe.error.delProp', ['highlight-current-column', 'column-config.isCurrent'])
+        }
+        if (props.highlightHoverColumn) {
+          warnLog('vxe.error.delProp', ['highlight-hover-column', 'column-config.isHover'])
+        }
+        // 检查导入导出类型，如果自定义导入导出方法，则不校验类型
+        if (importConfig && importOpts.types && !importOpts.importMethod && !XEUtils.includeArrays(XEUtils.keys(importOpts._typeMaps), importOpts.types)) {
+          warnLog('vxe.error.errProp', [`export-config.types=${importOpts.types.join(',')}`, importOpts.types.filter((type) => XEUtils.includes(XEUtils.keys(importOpts._typeMaps), type)).join(',') || XEUtils.keys(importOpts._typeMaps).join(',')])
+        }
+        if (exportConfig && exportOpts.types && !exportOpts.exportMethod && !XEUtils.includeArrays(XEUtils.keys(exportOpts._typeMaps), exportOpts.types)) {
+          warnLog('vxe.error.errProp', [`export-config.types=${exportOpts.types.join(',')}`, exportOpts.types.filter((type) => XEUtils.includes(XEUtils.keys(exportOpts._typeMaps), type)).join(',') || XEUtils.keys(exportOpts._typeMaps).join(',')])
         }
 
-        if (process.env.VUE_APP_VXE_ENV === 'development') {
-          const customOpts = computeCustomOpts.value
-          const mouseOpts = computeMouseOpts.value
-          const rowOpts = computeRowOpts.value
-          if (!props.id) {
-            if ((props.customConfig ? isEnableConf(customOpts) : customOpts.enabled) && customOpts.storage) {
-              errLog('vxe.error.reqProp', ['id'])
-            }
+        if (!props.id) {
+          if ((props.customConfig ? isEnableConf(customOpts) : customOpts.enabled) && customOpts.storage) {
+            errLog('vxe.error.reqProp', ['id'])
           }
-          if (props.treeConfig && checkboxOpts.range) {
-            errLog('vxe.error.noTree', ['checkbox-config.range'])
+        }
+        if (props.treeConfig && checkboxOpts.range) {
+          errLog('vxe.error.noTree', ['checkbox-config.range'])
+        }
+        if (rowOpts.height && !props.showOverflow) {
+          warnLog('vxe.error.notProp', ['table.show-overflow'])
+        }
+        if (!$xeTable.handleCellAreaMousedownEvent) {
+          if (props.areaConfig) {
+            warnLog('vxe.error.notProp', ['area-config'])
           }
-          if (rowOpts.height && !props.showOverflow) {
-            warnLog('vxe.error.notProp', ['table.show-overflow'])
+          if (props.clipConfig) {
+            warnLog('vxe.error.notProp', ['clip-config'])
           }
-          if (!$xeTable.handleMousedownCellAreaEvent) {
-            if (props.areaConfig) {
-              warnLog('vxe.error.notProp', ['area-config'])
-            }
-            if (props.clipConfig) {
-              warnLog('vxe.error.notProp', ['clip-config'])
-            }
-            if (props.fnrConfig) {
-              warnLog('vxe.error.notProp', ['fnr-config'])
-            }
-            if (mouseOpts.area) {
-              errLog('vxe.error.notProp', ['mouse-config.area'])
-              return
-            }
+          if (props.fnrConfig) {
+            warnLog('vxe.error.notProp', ['fnr-config'])
           }
-          if (props.dragConfig) {
-            warnLog('vxe.error.delProp', ['drag-config', 'row-drag-config'])
+          if (mouseOpts.area) {
+            errLog('vxe.error.notProp', ['mouse-config.area'])
+            return
           }
-          if (props.treeConfig && treeOpts.children) {
-            warnLog('vxe.error.delProp', ['tree-config.children', 'tree-config.childrenField'])
-          }
-          if (props.treeConfig && treeOpts.line) {
-            warnLog('vxe.error.delProp', ['tree-config.line', 'tree-config.showLine'])
-          }
-          if (mouseOpts.area && mouseOpts.selected) {
-            warnLog('vxe.error.errConflicts', ['mouse-config.area', 'mouse-config.selected'])
-          }
-          // if (mouseOpts.area && checkboxOpts.range) {
-          //   warnLog('vxe.error.errConflicts', ['mouse-config.area', 'checkbox-config.range'])
-          // }
-          if (mouseOpts.area && (props.treeConfig && !treeOpts.transform)) {
-            errLog('vxe.error.noTree', ['mouse-config.area'])
-          }
-          if (props.editConfig && editOpts.activeMethod) {
-            warnLog('vxe.error.delProp', ['edit-config.activeMethod', 'edit-config.beforeEditMethod'])
-          }
-          if (props.treeConfig && checkboxOpts.isShiftKey) {
-            errLog('vxe.error.errConflicts', ['tree-config', 'checkbox-config.isShiftKey'])
-          }
-          if (checkboxOpts.halfField) {
-            warnLog('vxe.error.delProp', ['checkbox-config.halfField', 'checkbox-config.indeterminateField'])
-          }
+        }
+        if (treeConfig && rowOpts.drag && !treeOpts.transform) {
+          errLog('vxe.error.notSupportProp', ['column-config.drag', 'tree-config.transform=false', 'tree-config.transform=true'])
+        }
+        if (props.dragConfig) {
+          warnLog('vxe.error.delProp', ['drag-config', 'row-drag-config'])
+        }
+        if (props.treeConfig && treeOpts.children) {
+          warnLog('vxe.error.delProp', ['tree-config.children', 'tree-config.childrenField'])
+        }
+        if (props.treeConfig && treeOpts.line) {
+          warnLog('vxe.error.delProp', ['tree-config.line', 'tree-config.showLine'])
+        }
+        if (mouseOpts.area && mouseOpts.selected) {
+          warnLog('vxe.error.errConflicts', ['mouse-config.area', 'mouse-config.selected'])
+        }
+        if (mouseOpts.area && (props.treeConfig && !treeOpts.transform)) {
+          errLog('vxe.error.noTree', ['mouse-config.area'])
+        }
+        if (props.editConfig && editOpts.activeMethod) {
+          warnLog('vxe.error.delProp', ['edit-config.activeMethod', 'edit-config.beforeEditMethod'])
+        }
+        if (props.treeConfig && checkboxOpts.isShiftKey) {
+          errLog('vxe.error.errConflicts', ['tree-config', 'checkbox-config.isShiftKey'])
+        }
+        if (checkboxOpts.halfField) {
+          warnLog('vxe.error.delProp', ['checkbox-config.halfField', 'checkbox-config.indeterminateField'])
         }
 
         // 检查是否有安装需要的模块
-        if (process.env.VUE_APP_VXE_ENV === 'development') {
-          if (props.editConfig && !$xeTable.insert) {
-            errLog('vxe.error.reqModule', ['Edit'])
-          }
-          if (props.editRules && !$xeTable.validate) {
-            errLog('vxe.error.reqModule', ['Validator'])
-          }
-          if ((checkboxOpts.range || props.keyboardConfig || props.mouseConfig) && !$xeTable.handleCellMousedownEvent) {
-            errLog('vxe.error.reqModule', ['Keyboard'])
-          }
-          if ((props.printConfig || props.importConfig || props.exportConfig) && !$xeTable.exportData) {
-            errLog('vxe.error.reqModule', ['Export'])
-          }
+        if (props.editConfig && !$xeTable.insert) {
+          errLog('vxe.error.reqModule', ['Edit'])
+        }
+        if (props.editRules && !$xeTable.validate) {
+          errLog('vxe.error.reqModule', ['Validator'])
+        }
+        if ((checkboxOpts.range || props.keyboardConfig || props.mouseConfig) && !$xeTable.handleCellMousedownEvent) {
+          errLog('vxe.error.reqModule', ['Keyboard'])
+        }
+        if ((props.printConfig || props.importConfig || props.exportConfig) && !$xeTable.exportData) {
+          errLog('vxe.error.reqModule', ['Export'])
         }
 
         Object.assign(scrollYStore, {
@@ -10011,6 +10404,12 @@ export default defineComponent({
           }
         }
       })
+
+      const tableViewportEl = refTableViewportElem.value
+      if (tableViewportEl) {
+        tableViewportEl.addEventListener('wheel', $xeTable.triggerBodyWheelEvent, { passive: false })
+      }
+
       globalEvents.on($xeTable, 'paste', handleGlobalPasteEvent)
       globalEvents.on($xeTable, 'copy', handleGlobalCopyEvent)
       globalEvents.on($xeTable, 'cut', handleGlobalCutEvent)
@@ -10024,6 +10423,10 @@ export default defineComponent({
     })
 
     onBeforeUnmount(() => {
+      const tableViewportEl = refTableViewportElem.value
+      if (tableViewportEl) {
+        tableViewportEl.removeEventListener('wheel', $xeTable.triggerBodyWheelEvent)
+      }
       if (resizeObserver) {
         resizeObserver.disconnect()
       }

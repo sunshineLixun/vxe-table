@@ -22,7 +22,7 @@
   --vxe-ui-table-header-font-color: var(--vxe-ui-font-color);
   --vxe-ui-table-footer-font-color: var(--vxe-ui-font-color);
   --vxe-ui-table-border-radius: var(--vxe-ui-border-radius);
-  --vxe-ui-table-border-width: 1px;
+  --vxe-ui-table-border-width: 1.05px;
   --vxe-ui-table-resizable-line-color: #D9DDDF;
   --vxe-ui-table-resizable-drag-line-color: var(--vxe-ui-font-primary-color);
   --vxe-ui-table-footer-background-color: var(--vxe-ui-layout-background-color);
@@ -46,6 +46,7 @@
   --vxe-ui-table-cell-padding-small: 6px;
   --vxe-ui-table-cell-padding-mini: 4px;
   --vxe-ui-table-cell-placeholder-color: #C0C4CC;
+  --vxe-ui-table-cell-negative-color: #f56c6c;
   --vxe-ui-table-cell-input-height-default: var(--vxe-ui-table-row-height-default) - 6;
   --vxe-ui-table-cell-input-height-medium: var(--vxe-ui-table-row-height-medium) - 6;
   --vxe-ui-table-cell-input-height-small: var(--vxe-ui-table-row-height-small) - 6;

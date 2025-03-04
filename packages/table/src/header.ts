@@ -44,8 +44,8 @@ export default defineComponent({
 
     const renderRows = (isGroup: boolean, isOptimizeMode: boolean, cols: VxeTableDefines.ColumnInfo[], $rowIndex: number) => {
       const { fixedType } = props
-      const { resizable: allResizable, border, columnKey, headerCellClassName, headerCellStyle, showHeaderOverflow: allColumnHeaderOverflow, headerAlign: allHeaderAlign, align: allAlign, mouseConfig } = tableProps
-      const { currentColumn, scrollXLoad, scrollYLoad, overflowX } = tableReactData
+      const { resizable: allResizable, columnKey, headerCellClassName, headerCellStyle, showHeaderOverflow: allColumnHeaderOverflow, headerAlign: allHeaderAlign, align: allAlign, mouseConfig } = tableProps
+      const { currentColumn, dragCol, scrollXLoad, scrollYLoad, overflowX } = tableReactData
       const { scrollXStore } = tableInternalData
       const columnOpts = computeColumnOpts.value
       const columnDragOpts = computeColumnDragOpts.value
@@ -116,8 +116,10 @@ export default defineComponent({
 
         let isVNPreEmptyStatus = false
         if (!isGroup) {
-          if (scrollXLoad && !column.fixed && (_columnIndex < scrollXStore.visibleStartIndex - scrollXStore.preloadSize || _columnIndex > scrollXStore.visibleEndIndex + scrollXStore.preloadSize)) {
-            isVNPreEmptyStatus = true
+          if (!dragCol || dragCol.id !== colid) {
+            if (scrollXLoad && !column.fixed && (_columnIndex < scrollXStore.visibleStartIndex - scrollXStore.preloadSize || _columnIndex > scrollXStore.visibleEndIndex + scrollXStore.preloadSize)) {
+              isVNPreEmptyStatus = true
+            }
           }
         }
 
@@ -142,8 +144,8 @@ export default defineComponent({
             'is--sortable': column.sortable,
             'col--filter': !!filters,
             'is--filter-active': hasFilter,
-            'is--drag-active': !column.fixed && !isDisabledDrag && (isCrossDrag || isPeerDrag || !column.parentId),
-            'is--drag-disabled': isDisabledDrag,
+            'is--drag-active': columnOpts.drag && !column.fixed && !isDisabledDrag && (isCrossDrag || isPeerDrag || !column.parentId),
+            'is--drag-disabled': columnOpts.drag && isDisabledDrag,
             'col--current': currentColumn === column
           },
           headerClassName ? (XEUtils.isFunction(headerClassName) ? headerClassName(cellParams) : headerClassName) : '',
@@ -174,9 +176,7 @@ export default defineComponent({
            */
           !fixedHiddenColumn && showResizable
             ? h('div', {
-              class: ['vxe-cell--col-resizable', {
-                'is--line': !border || border === 'none'
-              }],
+              class: 'vxe-cell--col-resizable',
               onMousedown: (evnt: MouseEvent) => $xeTable.handleColResizeMousedownEvent(evnt, fixedType, cellParams),
               onDblclick: (evnt: MouseEvent) => $xeTable.handleColResizeDblclickEvent(evnt, cellParams)
             })
@@ -223,7 +223,7 @@ export default defineComponent({
     const renderVN = () => {
       const { fixedType, fixedColumn, tableColumn } = props
       const { mouseConfig, showHeaderOverflow: allColumnHeaderOverflow, spanMethod, footerSpanMethod } = tableProps
-      const { isGroup, scrollXLoad, scrollYLoad, dragCol } = tableReactData
+      const { isGroup, overflowX, scrollXLoad, scrollYLoad, dragCol } = tableReactData
       const { visibleColumn, fullColumnIdData } = tableInternalData
 
       const mouseOpts = computeMouseOpts.value
@@ -243,8 +243,11 @@ export default defineComponent({
           }
         }
 
-        if (fixedType) {
+        if (fixedType || !overflowX) {
           renderColumnList = visibleColumn
+        }
+
+        if (fixedType) {
           // 如果是使用优化模式
           if (isOptimizeMode) {
             renderColumnList = fixedColumn || []

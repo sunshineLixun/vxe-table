@@ -17,6 +17,7 @@ export default {
       groupTag: 'O cabeçalho da coluna de agrupamento deve usar "{0}" em vez de "{1}", o que pode causar erros.',
       scrollErrProp: 'O parâmetro "{0}" não é suportado quando a rolagem virtual está habilitada.',
       errConflicts: 'O argumento "{0}" entra em conflito com "{1}"',
+      notSupportProp: '当启用参数 "{0}" 时不支持 "{1}"，应该为 "{2}"，否则将会出现错误',
       unableInsert: 'Não é possível inserir na localização especificada.',
       useErr: 'Erro ao instalar o módulo "{0}", possivelmente na ordem errada, os módulos dependentes precisam ser instalados antes da Tabela.',
       barUnableLink: 'A barra de ferramentas não pode ser associada à tabela.',
@@ -50,7 +51,7 @@ export default {
       treeNotImp: 'A tabela de árvore não suporta importação.',
       treeCrossDrag: '只能拖拽第一层级',
       treeDragChild: '父级不能拖拽到自己的子级中',
-      reqPlugin: '可选扩展插件 "{1}" https://vxeui.com/other{0}/#/{1}/install'
+      reqPlugin: '扩展插件未安装 "{1}" https://vxeui.com/other{0}/#/{1}/install'
     },
     table: {
       emptyText: 'Sem dados',
@@ -118,7 +119,8 @@ export default {
     },
     button: {
       confirm: 'Confirmar',
-      cancel: 'Cancelar'
+      cancel: 'Cancelar',
+      clear: '清除'
     },
     filter: {
       search: 'Buscar'
@@ -170,6 +172,7 @@ export default {
         pdf: 'PDF (*.pdf)'
       },
       modes: {
+        empty: '空数据',
         current: 'Dados atuais (dados da página atual)',
         selected: 'Dados selecionados (dados selecionados na página atual)',
         all: 'Todos os dados (incluindo todos os dados de paginação)'

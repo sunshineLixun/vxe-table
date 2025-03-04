@@ -17,6 +17,7 @@ export default {
       groupTag: '分組列頭應該使用 "{0}" 而不是 "{1}"，這可能會出現錯誤',
       scrollErrProp: '啟用虛擬滾動後不支援此參數 "{0}"',
       errConflicts: '參數 "{0}" 與 "{1}" 有衝突',
+      notSupportProp: '当启用参数 "{0}" 时不支持 "{1}"，应该为 "{2}"，否则将会出现错误',
       unableInsert: '無法插入指定位置，請檢查參數是否正確',
       useErr: '安裝 "{0}" 模組時發生錯誤，可能順序不正確，依賴的模組需要在 Table 之前安裝',
       barUnableLink: '工具列無法關聯表格',
@@ -50,7 +51,7 @@ export default {
       treeNotImp: '樹表格不支援導入',
       treeCrossDrag: '只能拖曳第一層級',
       treeDragChild: '父級不能拖曳到自己的子級中',
-      reqPlugin: '選用擴充插件 "{1}" https://vxeui.com/other{0}/#/{1}/install'
+      reqPlugin: '擴展挿件未安裝 "{1}" https://vxeui.com/other{0}/#/{1}/install'
     },
     table: {
       emptyText: '暫無數據',
@@ -118,7 +119,8 @@ export default {
     },
     button: {
       confirm: '確認',
-      cancel: '取消'
+      cancel: '取消',
+      clear: '清除'
     },
     filter: {
       search: '搜尋'
@@ -170,6 +172,7 @@ export default {
         pdf: 'PDF (*.pdf)'
       },
       modes: {
+        empty: '空数据',
         current: '目前數據（當前頁的數據）',
         selected: '選取資料（目前頁選取的資料）',
         all: '全量資料（包括所有分頁的資料）'
@@ -293,7 +296,7 @@ export default {
       }
     },
     numberInput: {
-      currencySymbol: '￥'
+      currencySymbol: '¥'
     },
     imagePreview: {
       popupTitle: '預覽',

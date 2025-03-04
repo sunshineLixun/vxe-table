@@ -17,6 +17,7 @@ export default {
       groupTag: 'Le intestazioni delle colonne di raggruppamento devono utilizzare "{0}" anziché "{1}", il che potrebbe causare errori',
       scrollErrProp: 'Il parametro "{0}" non è supportato quando è abilitato lo scorrimento virtuale',
       errConflicts: 'I parametri "{0}" sono in conflitto con "{1}"',
+      notSupportProp: '当启用参数 "{0}" 时不支持 "{1}"，应该为 "{2}"，否则将会出现错误',
       unableInsert: 'Impossibile inserire nella posizione specificata, verificare se i parametri sono corretti',
       useErr: "Si è verificato un errore durante l'installazione del modulo \"{0}\". L'ordine potrebbe essere errato. I moduli dipendenti devono essere installati prima della Tabella.",
       barUnableLink: 'La barra degli strumenti non può essere associata alla tabella',
@@ -50,7 +51,7 @@ export default {
       treeNotImp: "Le tabelle dell'albero non supportano l'importazione",
       treeCrossDrag: 'È possibile trascinare solo il primo livello',
       treeDragChild: 'Un genitore non può essere trascinato nei propri figli',
-      reqPlugin: 'Estensione facoltativa "{1}" https://vxeui.com/other{0}/#/{1}/install'
+      reqPlugin: '扩展插件未安装 "{1}" https://vxeui.com/other{0}/#/{1}/install'
     },
     table: {
       emptyText: 'Nessun dato ancora',
@@ -118,7 +119,8 @@ export default {
     },
     button: {
       confirm: 'confermare',
-      cancel: 'Cancellare'
+      cancel: 'Cancellare',
+      clear: '清除'
     },
     filter: {
       search: 'ricerca'
@@ -170,6 +172,7 @@ export default {
         pdf: 'PDF (*.pdf)'
       },
       modes: {
+        empty: '空数据',
         current: 'Dati attuali (dati della pagina corrente)',
         selected: 'Dati selezionati (dati selezionati nella pagina corrente)',
         all: 'Dati completi (compresi tutti i dati impaginati)'

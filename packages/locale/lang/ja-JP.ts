@@ -10,13 +10,14 @@ export default {
       text: 'Loading...'
     },
     error: {
-      downErr: '下载失败',
+      downErr: 'ダウンロードに失敗しました',
       errLargeData: '当绑定的数据量过大时，应该请使用 {0}，否则可能会出现卡顿',
       groupFixed: 'ヘッダー結合を使用する場合、固定列はグループで設定しなければなりません',
       groupMouseRange: 'ヘッダー結合と「{0}」は同時に使用できません。これによりエラーが発生する可能性があります',
       groupTag: 'ヘッダー結合は "{0}" を使ってください。 "{1}" はエラーが発生する可能性があります',
       scrollErrProp: '仮想スクロールはこのパラメータを使えません： "{0}"',
       errConflicts: 'パラメータ "{0}" と "{1}" は同時に使えません',
+      notSupportProp: '当启用参数 "{0}" 时不支持 "{1}"，应该为 "{2}"，否则将会出现错误',
       unableInsert: '指定された位置に挿入できない',
       useErr: '"{0}" モジュールをインストールする際にエラーが発生し、順序が正しくない可能性がある。依存するモジュールはTableの前にインストールする必要がある',
       barUnableLink: 'ツールバーはフォームを関連付けることができない',
@@ -50,7 +51,7 @@ export default {
       treeNotImp: 'ツリーテーブルはインポートをサポートしていません',
       treeCrossDrag: '只能拖拽第一层级',
       treeDragChild: '父级不能拖拽到自己的子级中',
-      reqPlugin: '可选扩展插件 "{1}" https://vxeui.com/other{0}/#/{1}/install'
+      reqPlugin: '扩展插件未安装 "{1}" https://vxeui.com/other{0}/#/{1}/install'
     },
     table: {
       emptyText: 'データがありません',
@@ -118,7 +119,8 @@ export default {
     },
     button: {
       confirm: 'OK',
-      cancel: 'キャンセル'
+      cancel: 'キャンセル',
+      clear: 'パージ'
     },
     filter: {
       search: '検索'
@@ -170,6 +172,7 @@ export default {
         pdf: 'PDF (*.pdf)'
       },
       modes: {
+        empty: '空数据',
         current: '表示中のデータ(表示中のページのデータ)',
         selected: '選択したデータ(表示中のページに選択したデータ)',
         all: '全てのデータ（全てのページのデータを含む）'
